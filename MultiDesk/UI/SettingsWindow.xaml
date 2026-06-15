@@ -1,0 +1,90 @@
+<Window x:Class="MultiDesk.UI.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="MultiDesk Settings" Width="460" Height="620"
+        WindowStartupLocation="CenterScreen" ResizeMode="CanResize"
+        Background="{DynamicResource SidebarBackground}">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="22">
+            <TextBlock Text="MultiDesk Settings" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,16" />
+
+            <TextBlock Text="APPEARANCE" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" Margin="0,4,0,8" />
+            <CheckBox x:Name="ChkTitles" Content="Show desktop titles" Margin="0,5" />
+            <TextBlock Text="Title alignment" Margin="0,10,0,5" />
+            <StackPanel Orientation="Horizontal">
+                <Button x:Name="BtnAlignLeft" Content="Left" Width="84" Height="28" Margin="0,0,8,0" Click="OnAlignLeft" />
+                <Button x:Name="BtnAlignCenter" Content="Center" Width="84" Height="28" Margin="0,0,8,0" Click="OnAlignCenter" />
+                <Button x:Name="BtnAlignRight" Content="Right" Width="84" Height="28" Click="OnAlignRight" />
+            </StackPanel>
+            <TextBlock Text="Theme" Margin="0,10,0,5" />
+            <StackPanel Orientation="Horizontal">
+                <Button x:Name="BtnThemeSystem" Content="System" Width="84" Height="28" Margin="0,0,8,0" Click="OnThemeSystem" />
+                <Button x:Name="BtnThemeDark" Content="Dark" Width="84" Height="28" Margin="0,0,8,0" Click="OnThemeDark" />
+                <Button x:Name="BtnThemeLight" Content="Light" Width="84" Height="28" Click="OnThemeLight" />
+            </StackPanel>
+
+            <TextBlock Text="BAR" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" Margin="0,18,0,8" />
+            <TextBlock Text="Dock edge" Margin="0,0,0,5" />
+            <WrapPanel>
+                <Button x:Name="BtnEdgeLeft" Content="Left" Width="84" Height="28" Margin="0,0,8,8" Click="OnEdgeLeft" />
+                <Button x:Name="BtnEdgeRight" Content="Right" Width="84" Height="28" Margin="0,0,8,8" Click="OnEdgeRight" />
+                <Button x:Name="BtnEdgeTop" Content="Top" Width="84" Height="28" Margin="0,0,8,8" Click="OnEdgeTop" />
+                <Button x:Name="BtnEdgeBottom" Content="Bottom" Width="84" Height="28" Margin="0,0,8,8" Click="OnEdgeBottom" />
+                <Button x:Name="BtnEdgeFloat" Content="Floating" Width="84" Height="28" Margin="0,0,8,8" Click="OnEdgeFloat" />
+            </WrapPanel>
+            <CheckBox x:Name="ChkAutoHide" Content="Auto-hide (collapse to a thin strip)" Margin="0,6" />
+            <CheckBox x:Name="ChkAlwaysOnTop" Content="Always on top" Margin="0,6" />
+            <CheckBox x:Name="ChkReserveSpace" Content="Reserve screen space when docked (off = overlay)" Margin="0,6" />
+            <CheckBox x:Name="ChkShowCoffee" Content="Show 'Buy me a coffee' on the bar" Margin="0,6" />
+
+            <Grid Margin="0,12,0,0">
+                <TextBlock Text="Bar thickness" />
+                <TextBlock x:Name="TxtThickness" HorizontalAlignment="Right" Foreground="{DynamicResource TextSecondary}" />
+            </Grid>
+            <Slider x:Name="SldThickness" Minimum="56" Maximum="400" Margin="0,4,0,0"
+                    ValueChanged="OnThicknessChanged" PreviewMouseUp="OnSliderCommit" />
+
+            <Grid Margin="0,12,0,0">
+                <TextBlock Text="Icon size" />
+                <TextBlock x:Name="TxtIcon" HorizontalAlignment="Right" Foreground="{DynamicResource TextSecondary}" />
+            </Grid>
+            <Slider x:Name="SldIcon" Minimum="16" Maximum="64" Margin="0,4,0,0"
+                    ValueChanged="OnIconChanged" PreviewMouseUp="OnSliderCommit" />
+
+            <TextBlock Text="BEHAVIOR" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" Margin="0,18,0,8" />
+            <CheckBox x:Name="ChkAltTab" Content="Show all desktops' windows in Alt+Tab" Margin="0,5" />
+            <CheckBox x:Name="ChkAutoSwitch" Content="Follow focus across desktops" Margin="0,5" />
+            <CheckBox x:Name="ChkRemember" Content="Remember window placement across restarts" Margin="0,5" />
+            <CheckBox x:Name="ChkPersistPreviews" Content="Remember window previews (uses more memory)" Margin="0,5" />
+            <CheckBox x:Name="ChkTrim" Content="Trim memory of off-desktop windows" Margin="0,5" />
+            <Grid Margin="0,10,0,0">
+                <TextBlock Text="Trim delay" />
+                <TextBlock x:Name="TxtTrim" HorizontalAlignment="Right" Foreground="{DynamicResource TextSecondary}" />
+            </Grid>
+            <Slider x:Name="SldTrim" Minimum="1" Maximum="60" Margin="0,4,0,0"
+                    ValueChanged="OnTrimChanged" PreviewMouseUp="OnSliderCommit" />
+            <CheckBox x:Name="ChkSwitcher" Content="Cross-desktop switcher hotkey (Ctrl+Alt+D)" Margin="0,10,0,5" />
+            <CheckBox x:Name="ChkStartup" Content="Start MultiDesk with Windows" Margin="0,5" />
+
+            <TextBlock Text="BACKUP" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" Margin="0,18,0,8" />
+            <StackPanel Orientation="Horizontal">
+                <Button x:Name="BtnBackup" Content="Back up..." Width="104" Height="28" Margin="0,0,8,0" Click="OnBackup" />
+                <Button x:Name="BtnRestore" Content="Restore..." Width="104" Height="28" Click="OnRestore" />
+            </StackPanel>
+            <TextBlock x:Name="BackupStatus" Foreground="{DynamicResource TextSecondary}" FontSize="11"
+                       Margin="0,6,0,0" TextWrapping="Wrap" />
+
+            <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource TextSecondary}" FontSize="11" Margin="0,16,0,0"
+                       Text="Settings, desktop names, heights, and app pins are saved to a JSON file you can back up, edit, and restore. Unpinned windows are restored to their last desktop by best effort (matched by app, profile, and title) when 'Remember window placement' is on." />
+
+            <Button x:Name="CoffeeBtnSettings" Click="OnCoffee" Cursor="Hand"
+                    BorderThickness="1" BorderBrush="{DynamicResource SeparatorColor}" Background="Transparent"
+                    Padding="8,6" Margin="0,18,0,4" HorizontalAlignment="Stretch" ToolTip="Support MultiDesk">
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                    <TextBlock Text="&#x2764;" Foreground="{DynamicResource AccentBrush}" VerticalAlignment="Center" Margin="0,0,6,0" />
+                    <TextBlock Text="Buy me a coffee" FontSize="12" VerticalAlignment="Center" Foreground="{DynamicResource TextPrimary}" />
+                </StackPanel>
+            </Button>
+        </StackPanel>
+    </ScrollViewer>
+</Window>

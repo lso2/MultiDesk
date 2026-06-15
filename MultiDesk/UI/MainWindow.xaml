@@ -1,0 +1,76 @@
+<Window x:Class="MultiDesk.UI.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ui="clr-namespace:MultiDesk.UI"
+        Title="MultiDesk" WindowStyle="None" ResizeMode="NoResize" ShowInTaskbar="False"
+        AllowsTransparency="False" UseLayoutRounding="True" SnapsToDevicePixels="True"
+        Background="{DynamicResource SidebarBackground}" Width="110" Height="600">
+    <Window.Resources>
+        <!-- Themed tooltip shared by the bar's own controls (header, coffee button). -->
+        <Style x:Key="BarTipStyle" TargetType="ToolTip">
+            <Setter Property="OverridesDefaultStyle" Value="True" />
+            <Setter Property="HasDropShadow" Value="True" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToolTip">
+                        <Border Background="{DynamicResource SectionActiveBackground}"
+                                BorderBrush="{DynamicResource SectionActiveBorder}" BorderThickness="1"
+                                CornerRadius="4" Padding="9,5" SnapsToDevicePixels="True">
+                            <TextBlock Text="{TemplateBinding Content}" Foreground="{DynamicResource TextPrimary}"
+                                       FontSize="12" FontWeight="SemiBold" TextWrapping="NoWrap" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+    <Grid x:Name="RootGrid">
+        <DockPanel x:Name="RootDock" LastChildFill="True">
+        <Border x:Name="Header" DockPanel.Dock="Top" Background="{DynamicResource SectionActiveBackground}"
+                MouseLeftButtonDown="OnHeaderDown" MouseMove="OnHeaderMove" MouseLeftButtonUp="OnHeaderUp"
+                MouseRightButtonUp="OnHeaderRightClick" Cursor="SizeAll">
+            <Border.ToolTip>
+                <ToolTip Content="Drag to move. Right-click for options." Style="{StaticResource BarTipStyle}" />
+            </Border.ToolTip>
+            <TextBlock x:Name="HeaderText" Text="MultiDesk" Margin="8,5" FontSize="11" FontWeight="SemiBold"
+                       Foreground="{DynamicResource TitleText}" VerticalAlignment="Center" HorizontalAlignment="Center"
+                       TextTrimming="CharacterEllipsis">
+                <TextBlock.LayoutTransform>
+                    <RotateTransform x:Name="HeaderRotate" Angle="0" />
+                </TextBlock.LayoutTransform>
+            </TextBlock>
+        </Border>
+
+        <Button x:Name="CoffeeBtn" DockPanel.Dock="Bottom" Click="OnCoffee" Cursor="Hand"
+                BorderThickness="0" Background="Transparent" Padding="4,6" Margin="2,2,2,4">
+            <Button.ToolTip>
+                <ToolTip Content="Support the dev: Buy me a coffee!" Style="{StaticResource BarTipStyle}" />
+            </Button.ToolTip>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                <TextBlock Text="&#x2615;" FontFamily="Segoe UI Emoji" FontSize="13" VerticalAlignment="Center" Margin="0,0,5,0" />
+                <TextBlock Text="Coffee" FontSize="11" Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Center" />
+            </StackPanel>
+        </Button>
+
+        <ScrollViewer x:Name="Scroller" VerticalScrollBarVisibility="Hidden"
+                      HorizontalScrollBarVisibility="Disabled" Padding="0,2,0,2">
+            <ItemsControl x:Name="SectionsHost" HorizontalContentAlignment="Stretch">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <StackPanel Orientation="{Binding SectionsOrientation, RelativeSource={RelativeSource AncestorType=Window}}" />
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <ui:DesktopSection />
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
+        </DockPanel>
+
+        <Rectangle x:Name="Gripper" Width="5" Fill="Transparent"
+                   Cursor="SizeWE" HorizontalAlignment="Right" VerticalAlignment="Stretch"
+                   MouseLeftButtonDown="OnGripDown" MouseMove="OnGripMove" MouseLeftButtonUp="OnGripUp" />
+    </Grid>
+</Window>

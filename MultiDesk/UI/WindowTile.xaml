@@ -1,0 +1,26 @@
+<UserControl x:Class="MultiDesk.UI.WindowTile"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Focusable="False">
+    <UserControl.Resources>
+        <Style x:Key="TileRootStyle" TargetType="Border">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource TileHoverBackground}" />
+                </Trigger>
+                <DataTrigger Binding="{Binding IsActive}" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource ItemActiveBackground}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+    </UserControl.Resources>
+
+    <Border x:Name="Root" Style="{StaticResource TileRootStyle}" CornerRadius="4"
+            Padding="1" Margin="1" SnapsToDevicePixels="True">
+        <Image x:Name="IconImage" Source="{Binding Icon}" Width="24" Height="24" Stretch="Uniform" />
+    </Border>
+</UserControl>

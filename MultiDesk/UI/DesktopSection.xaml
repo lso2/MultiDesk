@@ -1,0 +1,62 @@
+<UserControl x:Class="MultiDesk.UI.DesktopSection"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="clr-namespace:MultiDesk.UI"
+             AllowDrop="True">
+    <UserControl.Resources>
+        <!-- Active desktop carries a full lighter border on all four sides, never one-sided. -->
+        <Style x:Key="SectionRootStyle" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource SectionBackground}" />
+            <Setter Property="BorderThickness" Value="1.5" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsActive}" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource SectionActiveBackground}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource SectionActiveBorder}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+    </UserControl.Resources>
+
+    <Border x:Name="Root" Style="{StaticResource SectionRootStyle}" CornerRadius="6" Margin="2" Padding="2">
+        <!-- DockPanel so the title can sit on top (vertical bar) or as a slim rotated strip on the
+             left (horizontal bar). The icon area fills the rest. Layout is set per dock edge in code. -->
+        <DockPanel x:Name="SectionDock" LastChildFill="True">
+            <Grid x:Name="TitleRow" DockPanel.Dock="Top" Margin="1,0,1,3">
+                <Grid.LayoutTransform>
+                    <RotateTransform x:Name="TitleRotate" Angle="0" />
+                </Grid.LayoutTransform>
+                <TextBlock x:Name="TitleText" Text="{Binding Name}" FontSize="10" FontWeight="SemiBold"
+                           Foreground="{DynamicResource TitleText}" TextTrimming="CharacterEllipsis"
+                           TextAlignment="Center" />
+                <TextBox x:Name="TitleEdit" FontSize="10" Visibility="Collapsed" TextAlignment="Center" />
+            </Grid>
+            <Grid>
+                <ScrollViewer x:Name="TilesScroller" VerticalScrollBarVisibility="Hidden"
+                              HorizontalScrollBarVisibility="Disabled" Margin="0,0,4,0" ScrollChanged="OnTilesScroll">
+                    <ItemsControl x:Name="Tiles" ItemsSource="{Binding Windows}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel Orientation="{Binding TilesOrientation, RelativeSource={RelativeSource AncestorType=UserControl}}" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <ui:WindowTile />
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+                <Border x:Name="ScrollIndicator" Width="3" HorizontalAlignment="Right" VerticalAlignment="Top"
+                        Background="{DynamicResource ChevronColor}" CornerRadius="1" Opacity="0.55"
+                        Cursor="Hand" Visibility="Collapsed"
+                        MouseLeftButtonDown="OnIndicatorDown" MouseMove="OnIndicatorMove"
+                        MouseLeftButtonUp="OnIndicatorUp" />
+                <Rectangle x:Name="SectionGrip" Height="6" Fill="Transparent" Cursor="SizeNS"
+                           VerticalAlignment="Bottom" HorizontalAlignment="Stretch"
+                           MouseLeftButtonDown="OnSectionGripDown" MouseMove="OnSectionGripMove"
+                           MouseLeftButtonUp="OnSectionGripUp" />
+            </Grid>
+        </DockPanel>
+    </Border>
+</UserControl>
