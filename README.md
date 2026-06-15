@@ -208,7 +208,7 @@ All data is stored locally under your user profile:
   "trimHiddenMemory": true,
   "trimDelayMs": 5000,
   "desktopCount": 6,
-  "desktopNames": ["Mail", "Work", "Coding", "Social", "Desktop 5", "Video"],
+  "desktopNames": ["Desktop 1", "Desktop 2", "Desktop 3", "Desktop 4", "Desktop 5", "Desktop 6"],
   "rowsPerDesktop": 3,
   "desktopRows": [0, 0, 0, 0, 0, 0],
   "startWithWindows": true,
