@@ -13,7 +13,7 @@ A lightweight Windows virtual-desktop sidebar and window manager. MultiDesk grou
 
 MultiDesk turns one cluttered taskbar into a set of focused desktops shown down the edge of your screen, with:
 
-- **🪟 Managed virtual desktops** - Group windows into desktops; switching shows that desktop's windows and hides the rest
+- **Managed virtual desktops** - Group windows into desktops; switching shows that desktop's windows and hides the rest
 - **📌 Dockable sidebar** - Dock to any screen edge, float it, or auto-hide it to a thin trigger strip
 - **🖼️ Live hover previews** - Hover an icon for a live thumbnail (or a remembered snapshot) with the window title
 - **🖱️ One-click control** - Click an icon to bring a window forward, click again to minimize, right-click for the full menu
