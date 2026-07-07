@@ -244,9 +244,15 @@ namespace MultiDesk.Models
 
         public int DesktopIndex { get; set; }
 
-        // Runtime only: true after an Alt+Tab reveal parked this window at the bottom of the z-order,
-        // so the next show lifts it back to the top instead of leaving it buried.
-        public bool ZTrashed { get; set; }
+        // Runtime only: true while this window is parked (visible but placed under the wallpaper, or
+        // moved off-screen when the OS rejects sub-shell placement), so it stays in the system
+        // Alt+Tab list without appearing on screen. Unparking lifts it back to the top.
+        public bool Parked { get; set; }
+
+        // Runtime only: the window's real position before an off-screen park, restored on unpark.
+        public bool HasParkPos { get; set; }
+        public int ParkLeft { get; set; }
+        public int ParkTop { get; set; }
 
         private string _title;
         public string Title

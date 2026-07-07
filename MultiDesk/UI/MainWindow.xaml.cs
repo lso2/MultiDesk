@@ -49,6 +49,12 @@ namespace MultiDesk.UI
             SectionsHost.ItemsSource = App.Desktops.Desktops;
             Scroller.SizeChanged += OnScrollerSizeChanged;
             SourceInitialized += OnSourceInitialized;
+            // The dock resizes this window natively, so WPF's cached Width/Height would otherwise stay
+            // at the XAML startup values. Whenever WPF later re-asserts its cached size (some property
+            // changes do), the bar snapped back to that stale startup width, which showed up as the
+            // sidebar shrinking to one column after toggling a settings checkbox. Keeping the cache in
+            // step with the real size makes any re-assert a no-op.
+            SizeChanged += (s, e) => { Width = e.NewSize.Width; Height = e.NewSize.Height; };
         }
 
         private bool _widthSnapped;

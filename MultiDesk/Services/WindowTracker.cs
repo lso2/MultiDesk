@@ -64,8 +64,11 @@ namespace MultiDesk.Services
         private void OnObject(uint evt, IntPtr hwnd, int idObject, int idChild)
         {
             if (idObject != NM.OBJID_WINDOW) return;
+            // Reorder is included so an off-desktop window that raises itself gets re-parked by the
+            // next refresh instead of sitting on top of the current desktop.
             if (evt == NM.EVENT_OBJECT_CREATE || evt == NM.EVENT_OBJECT_DESTROY ||
-                evt == NM.EVENT_OBJECT_SHOW || evt == NM.EVENT_OBJECT_NAMECHANGE)
+                evt == NM.EVENT_OBJECT_SHOW || evt == NM.EVENT_OBJECT_NAMECHANGE ||
+                evt == NM.EVENT_OBJECT_REORDER)
                 ScheduleRefresh();
         }
 
@@ -111,6 +114,9 @@ namespace MultiDesk.Services
                         dead.Add(w.Hwnd);
                 }
                 foreach (var h in dead) _desktops.RemoveWindow(h);
+
+                // The scan is in z order (top to bottom), which is exactly what stray detection needs.
+                _desktops.HealStrayParks(_scan);
             }
             catch (Exception ex) { Log.Error("tracker refresh", ex); }
         }

@@ -74,6 +74,7 @@ namespace MultiDesk.Interop
         public static extern IntPtr GetShellWindow();
 
         public const uint GW_OWNER = 4;
+        public const uint GW_HWNDNEXT = 2;
         public const uint GA_ROOT = 2;
         public const uint GA_ROOTOWNER = 3;
 
@@ -278,6 +279,7 @@ namespace MultiDesk.Interop
         public const uint EVENT_OBJECT_DESTROY = 0x8001;
         public const uint EVENT_OBJECT_SHOW = 0x8002;
         public const uint EVENT_OBJECT_HIDE = 0x8003;
+        public const uint EVENT_OBJECT_REORDER = 0x8004;
         public const uint EVENT_OBJECT_NAMECHANGE = 0x800C;
         public const uint WINEVENT_OUTOFCONTEXT = 0x0000;
         public const uint WINEVENT_SKIPOWNPROCESS = 0x0002;

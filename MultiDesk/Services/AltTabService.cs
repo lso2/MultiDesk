@@ -137,8 +137,10 @@ namespace MultiDesk.Services
 
         private static void Post(Action a)
         {
+            // Send priority puts the session end ahead of queued window events, so the commit logic
+            // runs before the selection's own foreground event whenever the two race an Alt release.
             var app = Application.Current;
-            if (app != null) app.Dispatcher.BeginInvoke(a);
+            if (app != null) app.Dispatcher.BeginInvoke(a, DispatcherPriority.Send);
         }
 
         private static void EndSession()
