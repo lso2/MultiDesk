@@ -4,7 +4,7 @@
         Title="MultiDesk Settings" Width="460" Height="620"
         WindowStartupLocation="CenterScreen" ResizeMode="CanResize"
         Background="{DynamicResource SidebarBackground}">
-    <ScrollViewer VerticalScrollBarVisibility="Auto">
+    <ScrollViewer x:Name="Scroller" VerticalScrollBarVisibility="Auto" PreviewMouseWheel="OnSettingsWheel">
         <StackPanel Margin="22">
             <TextBlock Text="MultiDesk Settings" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,16" />
 

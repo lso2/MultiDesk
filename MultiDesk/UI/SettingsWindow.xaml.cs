@@ -202,6 +202,14 @@ namespace MultiDesk.UI
 
         private void OnCoffee(object sender, RoutedEventArgs e) { App.OpenSupportLink(); }
 
+        // Fixed, gentle wheel step of 24 px per notch. Default handling multiplies the OS wheel-lines
+        // setting into jumps that overshoot whole sections in a panel this dense.
+        private void OnSettingsWheel(object sender, System.Windows.Input.MouseWheelEventArgs e)
+        {
+            Scroller.ScrollToVerticalOffset(Scroller.VerticalOffset - e.Delta / 120.0 * 24.0);
+            e.Handled = true;
+        }
+
         // ---- startup entry --------------------------------------------------
         private void SetStartup(bool on)
         {

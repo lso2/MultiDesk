@@ -34,6 +34,7 @@ namespace MultiDesk.Services
         private DispatcherTimer _altTabCommit;
         private DispatcherTimer _placementExpiry;
         private bool _altTabEnding; // true between Alt release and the commit that switches to the selection
+        private IntPtr _altTabStartFg; // foreground window when the gesture began, to tell a cancel from a choice
         private List<PlacementEntry> _pendingPlacements;
         private int _switchGuardUntil; // ignore focus-follow briefly after a switch, to avoid bouncing back
 
@@ -156,25 +157,36 @@ namespace MultiDesk.Services
             {
                 _altTabEnding = false;
                 AltTabActive = false;
-                SwitchTo(active.DesktopIndex, false);
+                SwitchTo(active.DesktopIndex, false, false);
                 return;
             }
 
-            // Only follow focus to a window that is genuinely visible (not one being hidden during a
-            // switch), and not during the brief settle window after a switch, so we never bounce back.
+            // Follow focus onto another desktop. Visible windows respect the settle window, because
+            // during a switch the OS reassigns foreground to whichever old-desktop window has not
+            // hidden yet, and following that would bounce the switch back. A hidden window can never
+            // be that reassignment target; foreground landing on a hidden window is always a
+            // deliberate external activation (a relaunched single-instance app, or an Alt+Tab choice
+            // whose activation arrived after the commit), so it is followed even while settling.
             if (active != null && active.DesktopIndex != ActiveIndex && _settings.Current.AutoSwitchOnForeground
-                && Environment.TickCount >= _switchGuardUntil && !AltTabActive && NM.IsWindowVisible(hwnd))
+                && !AltTabActive)
+            {
+                bool wasHidden = !NM.IsWindowVisible(hwnd);
+                if (!wasHidden && Environment.TickCount < _switchGuardUntil) return;
                 SwitchTo(active.DesktopIndex, false);
+                // The switch shows it without activating; raise it as well so the window the user
+                // asked for is on top, not buried under the desktop's existing z-order.
+                if (wasHidden) WindowActions.ForceForeground(hwnd);
+            }
         }
 
         // ---- desktop operations --------------------------------------------
-        public void SwitchTo(int index, bool activateTop = true)
+        public void SwitchTo(int index, bool activateTop = true, bool capturePreviews = true)
         {
             if (index < 0 || index >= Desktops.Count) return;
             _switchGuardUntil = Environment.TickCount + 600; // settle window for focus-follow
             ActiveIndex = index;
             for (int i = 0; i < Desktops.Count; i++) Desktops[i].IsActive = (i == index);
-            ApplyVisibility();
+            ApplyVisibility(capturePreviews);
             if (activateTop)
             {
                 var d = DesktopAt(index);
@@ -258,9 +270,13 @@ namespace MultiDesk.Services
             if (target == ActiveIndex) ShowWin(m.Hwnd); else HideWin(m.Hwnd);
         }
 
-        /// <summary>Reorder a window to sit before another, moving desktops if they differ. Used for
-        /// drag-to-reorder of the icons within or across desktops.</summary>
-        public void MoveWindowBefore(IntPtr draggedHwnd, IntPtr targetHwnd)
+        /// <summary>Reorder a window into the display slot of another, moving desktops if they differ.
+        /// Used for drag-to-reorder of the icons within or across desktops. The target's index is
+        /// captured BEFORE the dragged icon is removed: within one desktop, computing it after the
+        /// removal shifted every later icon back a slot, so a forward drag landed one spot early and
+        /// a one-step forward drag put the icon straight back where it started. Capturing first means
+        /// the icon lands exactly where it was dropped in both directions.</summary>
+        public void MoveWindowToSpotOf(IntPtr draggedHwnd, IntPtr targetHwnd)
         {
             WindowModel dragged, target;
             if (!_byHwnd.TryGetValue(draggedHwnd, out dragged)) return;
@@ -269,12 +285,12 @@ namespace MultiDesk.Services
             int targetDesktop = target.DesktopIndex;
             var from = DesktopAt(dragged.DesktopIndex);
             var to = DesktopAt(targetDesktop);
+            int idx = (to != null) ? to.Windows.IndexOf(target) : -1;
             if (from != null) from.Windows.Remove(dragged);
             dragged.DesktopIndex = targetDesktop;
             if (to != null)
             {
-                int idx = to.Windows.IndexOf(target);
-                if (idx < 0) idx = to.Windows.Count;
+                if (idx < 0 || idx > to.Windows.Count) idx = to.Windows.Count;
                 to.Windows.Insert(idx, dragged);
             }
             if (targetDesktop == ActiveIndex) ShowWin(dragged.Hwnd); else HideWin(dragged.Hwnd);
@@ -297,13 +313,28 @@ namespace MultiDesk.Services
         {
             AltTabActive = true;
             _altTabEnding = false;
+            _altTabStartFg = NM.GetForegroundWindow();
             // A fresh Alt+Tab cancels a still-pending commit from the previous one, so a late commit can
             // never fire mid-gesture and re-hide the windows we just revealed.
             if (_altTabCommit != null) _altTabCommit.Stop();
-            // Reveal synchronously (not the async ShowAllWindows) so each window has WS_VISIBLE set before
-            // Windows enumerates the Alt+Tab list. That is what makes all desktops appear every time.
+            // Reveal synchronously so each window has WS_VISIBLE set before Windows enumerates the
+            // Alt+Tab list, and reveal at the BOTTOM of the z-order so the current desktop keeps
+            // covering the screen. Revealing at the old z position painted other desktops' windows
+            // over everything for the whole hold, which read as windows flashing and apps switching
+            // by themselves. Hung windows are skipped and the synchronous phase is time-budgeted,
+            // because this runs inside the keyboard hook call, where one stalled app blocks every
+            // keystroke until the OS silently removes the hook.
+            const uint reveal = NM.SWP_NOMOVE | NM.SWP_NOSIZE | NM.SWP_NOACTIVATE | NM.SWP_SHOWWINDOW;
+            int start = Environment.TickCount;
             foreach (var w in _byHwnd.Values.ToList())
-                if (w.Hwnd != IntPtr.Zero && NM.IsWindow(w.Hwnd)) NM.ShowWindow(w.Hwnd, NM.SW_SHOWNA);
+            {
+                if (w.Hwnd == IntPtr.Zero || !NM.IsWindow(w.Hwnd)) continue;
+                if (NM.IsWindowVisible(w.Hwnd)) continue;
+                if (NM.IsHungAppWindow(w.Hwnd) || Environment.TickCount - start > 150)
+                    NM.SetWindowPos(w.Hwnd, NM.HWND_BOTTOM, 0, 0, 0, 0, reveal | NM.SWP_ASYNCWINDOWPOS);
+                else
+                    NM.SetWindowPos(w.Hwnd, NM.HWND_BOTTOM, 0, 0, 0, 0, reveal);
+            }
         }
 
         /// <summary>Alt released: switch to the desktop of whichever window was chosen, hiding the rest.</summary>
@@ -315,9 +346,27 @@ namespace MultiDesk.Services
             // whatever is in front. Keeping AltTabActive true until the commit also stops the tracker
             // pruning the revealed windows.
             _altTabEnding = true;
+            // Commit immediately only when the foreground has genuinely moved off the window the
+            // gesture started on (a mouse-click selection, or the activation outran the Alt release).
+            // Committing while the starting window was still in front is what made a quick flick land
+            // back where it began: Windows had not activated the real choice yet, so the choice then
+            // activated invisibly on a desktop that had just been re-hidden.
+            IntPtr now = NM.GetForegroundWindow();
+            WindowModel chosen;
+            if (now != IntPtr.Zero && now != _altTabStartFg && _byHwnd.TryGetValue(now, out chosen))
+            {
+                _altTabEnding = false;
+                AltTabActive = false;
+                SwitchTo(chosen.DesktopIndex, false, false);
+                return;
+            }
+            // Otherwise wait for the foreground event of the real selection (SetForeground commits the
+            // instant it arrives). The timer is only the backstop for a cancelled gesture, where no
+            // foreground change is coming, so its delay must outlast a slow activation to avoid
+            // committing to the wrong window first.
             if (_altTabCommit == null)
             {
-                _altTabCommit = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
+                _altTabCommit = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
                 _altTabCommit.Tick += (s, e) =>
                 {
                     _altTabCommit.Stop();
@@ -326,8 +375,8 @@ namespace MultiDesk.Services
                     AltTabActive = false;
                     IntPtr fg = NM.GetForegroundWindow();
                     WindowModel m;
-                    if (fg != IntPtr.Zero && _byHwnd.TryGetValue(fg, out m)) SwitchTo(m.DesktopIndex, false);
-                    else ApplyVisibility();
+                    if (fg != IntPtr.Zero && _byHwnd.TryGetValue(fg, out m)) SwitchTo(m.DesktopIndex, false, false);
+                    else ApplyVisibility(false);
                 };
             }
             _altTabCommit.Stop();
@@ -462,9 +511,14 @@ namespace MultiDesk.Services
         }
 
         // ---- internals ------------------------------------------------------
-        private void ApplyVisibility()
+        // capturePreviews is false on the Alt+Tab commit path: every desktop's windows are on screen
+        // right then, so capturing would PrintWindow dozens of windows in one synchronous pass, which
+        // froze the UI thread and made the windows vanish one by one instead of at once. The previews
+        // taken when each window was originally hidden are still current, since a window that was only
+        // revealed under the Alt+Tab overlay was not interacted with.
+        private void ApplyVisibility(bool capturePreviews = true)
         {
-            bool persist = _settings.Current.PersistPreviews;
+            bool persist = _settings.Current.PersistPreviews && capturePreviews;
             foreach (var kv in _byHwnd)
             {
                 var w = kv.Value;

@@ -160,6 +160,7 @@ namespace MultiDesk.Interop
         public const uint SWP_NOACTIVATE = 0x0010;
         public const uint SWP_SHOWWINDOW = 0x0040;
         public const uint SWP_FRAMECHANGED = 0x0020;
+        public const uint SWP_ASYNCWINDOWPOS = 0x4000;
 
         // ---- styles (64-bit safe) ------------------------------------------
         public static IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex)
@@ -345,6 +346,16 @@ namespace MultiDesk.Interop
 
         [DllImport("kernel32.dll", CharSet = CharSet.Auto)]
         public static extern IntPtr GetModuleHandle(string lpModuleName);
+
+        // Reads the physical key state, so the hook can verify Alt is really held and can recover
+        // from an Alt-up it never saw (secure desktop, UAC prompt, Win+L).
+        [DllImport("user32.dll")]
+        public static extern short GetAsyncKeyState(int vKey);
+
+        // True when a window's thread has stopped pumping messages. Used to skip such windows during
+        // the synchronous Alt+Tab reveal, where one hung app would stall the keyboard hook.
+        [DllImport("user32.dll")]
+        public static extern bool IsHungAppWindow(IntPtr hwnd);
 
         public const int WH_KEYBOARD_LL = 13;
         public const int WM_KEYDOWN = 0x0100;

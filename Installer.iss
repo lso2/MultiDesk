@@ -9,7 +9,7 @@
 ; exists at the path in [Files], then open this file in Inno Setup and press Compile.
 
 #define MyAppName "MultiDesk"
-#define MyAppVersion "2.5.7"
+#define MyAppVersion "2.7.2"
 #define MyAppPublisher "PlexPixel"
 #define MyAppExe "MultiDesk.exe"
 

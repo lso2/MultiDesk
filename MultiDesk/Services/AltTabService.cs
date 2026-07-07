@@ -1,6 +1,7 @@
 using System;
 using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Threading;
 using MultiDesk.Interop;
 using NM = MultiDesk.Interop.NativeMethods;
 
@@ -19,6 +20,7 @@ namespace MultiDesk.Services
         private IntPtr _hook;
         private bool _altDown;
         private bool _session;
+        private DispatcherTimer _watchdog;
 
         public AltTabService(SettingsStore settings)
         {
@@ -41,14 +43,42 @@ namespace MultiDesk.Services
                 _hook = NM.SetWindowsHookEx(NM.WH_KEYBOARD_LL, _proc, NM.GetModuleHandle(null), 0);
                 if (_hook == IntPtr.Zero) Log.Info("Alt+Tab hook did not install.");
                 else Log.Info("Alt+Tab across desktops enabled.");
+                StartWatchdog();
             }
             catch (Exception ex) { Log.Error("alt-tab hook install", ex); }
+        }
+
+        // Windows silently removes a low-level hook it judges too slow and never says so, which left
+        // this feature dead until the app restarted. Re-basing the hook while the keyboard is idle
+        // guarantees it returns within a minute of being dropped.
+        private void StartWatchdog()
+        {
+            if (_watchdog != null) return;
+            _watchdog = new DispatcherTimer { Interval = TimeSpan.FromSeconds(60) };
+            _watchdog.Tick += (s, e) =>
+            {
+                if (_hook == IntPtr.Zero || _session || _altDown || AltPhysicallyDown()) return;
+                try
+                {
+                    NM.UnhookWindowsHookEx(_hook);
+                    _hook = NM.SetWindowsHookEx(NM.WH_KEYBOARD_LL, _proc, NM.GetModuleHandle(null), 0);
+                    if (_hook == IntPtr.Zero) Log.Info("Alt+Tab hook refresh failed to reinstall.");
+                }
+                catch (Exception ex) { Log.Error("alt-tab hook refresh", ex); }
+            };
+            _watchdog.Start();
+        }
+
+        private static bool AltPhysicallyDown()
+        {
+            return (NM.GetAsyncKeyState(NM.VK_MENU) & 0x8000) != 0;
         }
 
         private void Uninstall()
         {
             try { if (_hook != IntPtr.Zero) NM.UnhookWindowsHookEx(_hook); }
             catch (Exception ex) { Log.Error("alt-tab hook remove", ex); }
+            if (_watchdog != null) { _watchdog.Stop(); _watchdog = null; }
             _hook = IntPtr.Zero;
             _altDown = false;
             _session = false;
@@ -78,11 +108,26 @@ namespace MultiDesk.Services
                     }
                     else if (vk == NM.VK_TAB && down && _altDown && !_session)
                     {
-                        _session = true;
-                        // Reveal synchronously, on this hook call, before Windows builds the Alt+Tab list,
-                        // so every desktop's windows are in it. Posting it would run too late to be included.
-                        try { if (App.Desktops != null) App.Desktops.BeginAltTab(); }
-                        catch (Exception ex) { Log.Error("alt-tab begin", ex); }
+                        // Trust the flag only when Alt is physically held right now. A missed Alt-up
+                        // (secure desktop, UAC, Win+L) used to leave _altDown stuck, so a plain Tab
+                        // press would reveal every desktop's windows out of nowhere.
+                        if (!AltPhysicallyDown()) { _altDown = false; }
+                        else
+                        {
+                            _session = true;
+                            // Reveal synchronously, on this hook call, before Windows builds the Alt+Tab list,
+                            // so every desktop's windows are in it. Posting it would run too late to be included.
+                            try { if (App.Desktops != null) App.Desktops.BeginAltTab(); }
+                            catch (Exception ex) { Log.Error("alt-tab begin", ex); }
+                        }
+                    }
+                    else if (_session && down && !AltPhysicallyDown())
+                    {
+                        // A session is open but Alt is no longer held, so its release was never seen.
+                        // Close the stale session now instead of leaving all windows revealed.
+                        _session = false;
+                        _altDown = false;
+                        Post(EndSession);
                     }
                 }
             }

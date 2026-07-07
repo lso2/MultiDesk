@@ -52,8 +52,8 @@ namespace MultiDesk.UI
             if (e.Data.GetDataPresent("MdWindow"))
             {
                 var dragged = e.Data.GetData("MdWindow") as WindowModel;
-                // Drop a window onto this one to reorder it before this tile (across desktops too).
-                if (dragged != null && dragged != m) App.Desktops.MoveWindowBefore(dragged.Hwnd, m.Hwnd);
+                // Drop a window onto this one to move it into this tile's slot (across desktops too).
+                if (dragged != null && dragged != m) App.Desktops.MoveWindowToSpotOf(dragged.Hwnd, m.Hwnd);
                 e.Handled = true;
             }
         }
