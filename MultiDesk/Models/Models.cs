@@ -244,6 +244,10 @@ namespace MultiDesk.Models
 
         public int DesktopIndex { get; set; }
 
+        // Runtime only: true after an Alt+Tab reveal parked this window at the bottom of the z-order,
+        // so the next show lifts it back to the top instead of leaving it buried.
+        public bool ZTrashed { get; set; }
+
         private string _title;
         public string Title
         {

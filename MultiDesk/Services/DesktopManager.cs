@@ -35,6 +35,15 @@ namespace MultiDesk.Services
         private DispatcherTimer _placementExpiry;
         private bool _altTabEnding; // true between Alt release and the commit that switches to the selection
         private IntPtr _altTabStartFg; // foreground window when the gesture began, to tell a cancel from a choice
+        // A window that grabbed foreground while the switcher was still up. The user cannot select
+        // anything before releasing Alt, so such a grab is an app asserting itself (a media window
+        // being re-shown is the classic case) and must never be mistaken for the user's choice.
+        private IntPtr _altTabSuspect;
+        // One-shot guard: right after focus is placed deliberately, an unrequested grab by a different
+        // window is reverted once. Media windows re-assert right after a switch touches them.
+        private IntPtr _fgGuardHwnd;
+        private int _fgGuardUntil;
+        private bool _fgGuardUsed;
         private List<PlacementEntry> _pendingPlacements;
         private int _switchGuardUntil; // ignore focus-follow briefly after a switch, to avoid bouncing back
 
@@ -150,14 +159,40 @@ namespace MultiDesk.Services
                 if (w.IsActive != on) w.IsActive = on;
                 if (on) active = w;
             }
+            // A tracked window taking foreground while the switcher is still up cannot be the user's
+            // choice, because nothing is selected until Alt is released. It is an app asserting itself
+            // (media windows do this when a reveal shows them), so remember it and never commit to it.
+            if (AltTabActive && !_altTabEnding && active != null)
+            {
+                _altTabSuspect = hwnd;
+                return;
+            }
+
             // Completing an Alt+Tab: the OS just activated the window the user chose, so switch to its
             // desktop now. Acting on this event is reliable, unlike reading the foreground on a fixed timer,
             // which can fire before the selection has settled and snap back to the previous window.
             if (_altTabEnding && active != null)
             {
+                // The suspect re-asserting after the release is still not a selection; hold out for
+                // the real choice's event, with the timer as the backstop.
+                if (hwnd == _altTabSuspect) return;
                 _altTabEnding = false;
                 AltTabActive = false;
+                if (_altTabCommit != null) _altTabCommit.Stop();
+                GuardForeground(hwnd);
                 SwitchTo(active.DesktopIndex, false, false);
+                return;
+            }
+
+            // One-shot revert: an unrequested grab by a different tracked window right after focus was
+            // placed deliberately gets pushed back once, which stops a media window from planting
+            // itself in front the moment a switch shows or hides it. Single-shot, so a genuine fast
+            // user action can never end up in a tug of war.
+            if (active != null && _fgGuardHwnd != IntPtr.Zero && hwnd != _fgGuardHwnd && !_fgGuardUsed
+                && Environment.TickCount < _fgGuardUntil && NM.IsWindow(_fgGuardHwnd))
+            {
+                _fgGuardUsed = true;
+                WindowActions.ForceForeground(_fgGuardHwnd);
                 return;
             }
 
@@ -191,10 +226,22 @@ namespace MultiDesk.Services
             {
                 var d = DesktopAt(index);
                 var top = (d != null && d.Windows.Count > 0) ? d.Windows[d.Windows.Count - 1] : null;
-                if (top != null) WindowActions.ForceForeground(top.Hwnd);
+                if (top != null)
+                {
+                    GuardForeground(top.Hwnd);
+                    WindowActions.ForceForeground(top.Hwnd);
+                }
             }
             ScheduleTrim();
             var h = ActiveChanged; if (h != null) h();
+        }
+
+        // Arm the one-shot foreground guard around a deliberate focus placement.
+        private void GuardForeground(IntPtr hwnd)
+        {
+            _fgGuardHwnd = hwnd;
+            _fgGuardUntil = Environment.TickCount + 600;
+            _fgGuardUsed = false;
         }
 
         public void AddDesktop()
@@ -267,7 +314,7 @@ namespace MultiDesk.Services
             if (from != null) from.Windows.Remove(m);
             m.DesktopIndex = target;
             if (to != null) to.Windows.Add(m);
-            if (target == ActiveIndex) ShowWin(m.Hwnd); else HideWin(m.Hwnd);
+            if (target == ActiveIndex) ShowWin(m); else HideWin(m.Hwnd);
         }
 
         /// <summary>Reorder a window into the display slot of another, moving desktops if they differ.
@@ -293,13 +340,13 @@ namespace MultiDesk.Services
                 if (idx < 0 || idx > to.Windows.Count) idx = to.Windows.Count;
                 to.Windows.Insert(idx, dragged);
             }
-            if (targetDesktop == ActiveIndex) ShowWin(dragged.Hwnd); else HideWin(dragged.Hwnd);
+            if (targetDesktop == ActiveIndex) ShowWin(dragged); else HideWin(dragged.Hwnd);
         }
 
         /// <summary>Safety: reveal every managed window so none is left hidden on a hidden desktop.</summary>
         public void ShowAllWindows()
         {
-            foreach (var w in _byHwnd.Values) ShowWin(w.Hwnd);
+            foreach (var w in _byHwnd.Values) ShowWin(w);
         }
 
         public void RefreshAll() { ApplyVisibility(); }
@@ -314,26 +361,31 @@ namespace MultiDesk.Services
             AltTabActive = true;
             _altTabEnding = false;
             _altTabStartFg = NM.GetForegroundWindow();
+            _altTabSuspect = IntPtr.Zero;
             // A fresh Alt+Tab cancels a still-pending commit from the previous one, so a late commit can
             // never fire mid-gesture and re-hide the windows we just revealed.
             if (_altTabCommit != null) _altTabCommit.Stop();
             // Reveal synchronously so each window has WS_VISIBLE set before Windows enumerates the
-            // Alt+Tab list, and reveal at the BOTTOM of the z-order so the current desktop keeps
-            // covering the screen. Revealing at the old z position painted other desktops' windows
-            // over everything for the whole hold, which read as windows flashing and apps switching
-            // by themselves. Hung windows are skipped and the synchronous phase is time-budgeted,
-            // because this runs inside the keyboard hook call, where one stalled app blocks every
-            // keystroke until the OS silently removes the hook.
+            // Alt+Tab list, and park each one UNDER the wallpaper window, where it is fully occluded
+            // and nothing paints on screen during the hold. The switcher lists windows by visibility,
+            // not z-order, so the list is complete while the desktop looks untouched. Windows parked
+            // this low are marked so the next show lifts them back to the top. Hung windows are
+            // skipped and the synchronous phase is time-budgeted, because this runs inside the
+            // keyboard hook call, where one stalled app blocks every keystroke until the OS silently
+            // removes the hook.
+            IntPtr park = NM.GetShellWindow();
+            if (park == IntPtr.Zero) park = NM.HWND_BOTTOM;
             const uint reveal = NM.SWP_NOMOVE | NM.SWP_NOSIZE | NM.SWP_NOACTIVATE | NM.SWP_SHOWWINDOW;
             int start = Environment.TickCount;
             foreach (var w in _byHwnd.Values.ToList())
             {
                 if (w.Hwnd == IntPtr.Zero || !NM.IsWindow(w.Hwnd)) continue;
                 if (NM.IsWindowVisible(w.Hwnd)) continue;
+                w.ZTrashed = true;
                 if (NM.IsHungAppWindow(w.Hwnd) || Environment.TickCount - start > 150)
-                    NM.SetWindowPos(w.Hwnd, NM.HWND_BOTTOM, 0, 0, 0, 0, reveal | NM.SWP_ASYNCWINDOWPOS);
+                    NM.SetWindowPos(w.Hwnd, park, 0, 0, 0, 0, reveal | NM.SWP_ASYNCWINDOWPOS);
                 else
-                    NM.SetWindowPos(w.Hwnd, NM.HWND_BOTTOM, 0, 0, 0, 0, reveal);
+                    NM.SetWindowPos(w.Hwnd, park, 0, 0, 0, 0, reveal);
             }
         }
 
@@ -353,10 +405,11 @@ namespace MultiDesk.Services
             // activated invisibly on a desktop that had just been re-hidden.
             IntPtr now = NM.GetForegroundWindow();
             WindowModel chosen;
-            if (now != IntPtr.Zero && now != _altTabStartFg && _byHwnd.TryGetValue(now, out chosen))
+            if (now != IntPtr.Zero && now != _altTabStartFg && now != _altTabSuspect && _byHwnd.TryGetValue(now, out chosen))
             {
                 _altTabEnding = false;
                 AltTabActive = false;
+                GuardForeground(now);
                 SwitchTo(chosen.DesktopIndex, false, false);
                 return;
             }
@@ -373,9 +426,11 @@ namespace MultiDesk.Services
                     if (!_altTabEnding) return; // already committed from the foreground event
                     _altTabEnding = false;
                     AltTabActive = false;
+                    // The suspect is accepted here: with no other foreground change arriving by the
+                    // deadline, the user may genuinely have selected that window.
                     IntPtr fg = NM.GetForegroundWindow();
                     WindowModel m;
-                    if (fg != IntPtr.Zero && _byHwnd.TryGetValue(fg, out m)) SwitchTo(m.DesktopIndex, false, false);
+                    if (fg != IntPtr.Zero && _byHwnd.TryGetValue(fg, out m)) { GuardForeground(fg); SwitchTo(m.DesktopIndex, false, false); }
                     else ApplyVisibility(false);
                 };
             }
@@ -519,24 +574,76 @@ namespace MultiDesk.Services
         private void ApplyVisibility(bool capturePreviews = true)
         {
             bool persist = _settings.Current.PersistPreviews && capturePreviews;
+            var d = DesktopAt(ActiveIndex);
+
+            var hides = new List<IntPtr>();
             foreach (var kv in _byHwnd)
             {
                 var w = kv.Value;
-                if (w.DesktopIndex == ActiveIndex) ShowWin(w.Hwnd);
-                else
-                {
-                    // Snapshot the window for the hover preview while it is still on screen, then hide it.
-                    if (persist && NM.IsWindowVisible(w.Hwnd)) PreviewCache.Capture(w.Hwnd);
-                    HideWin(w.Hwnd);
-                }
+                if (w.DesktopIndex == ActiveIndex) continue;
+                if (w.Hwnd == IntPtr.Zero || !NM.IsWindow(w.Hwnd)) continue;
+                if (!NM.IsWindowVisible(w.Hwnd)) continue;
+                // Snapshot the window for the hover preview while it is still on screen, then hide it.
+                if (persist) PreviewCache.Capture(w.Hwnd);
+                hides.Add(w.Hwnd);
             }
+
+            var shows = new List<WindowModel>();
+            if (d != null)
+                foreach (var w in d.Windows)
+                {
+                    if (w.Hwnd == IntPtr.Zero || !NM.IsWindow(w.Hwnd)) continue;
+                    if (NM.IsWindowVisible(w.Hwnd) && !w.ZTrashed) continue;
+                    shows.Add(w);
+                }
+
+            if (hides.Count == 0 && shows.Count == 0) return;
+
+            // One deferred batch applies every change in a single visual update, so the switch paints
+            // at once instead of windows disappearing one by one. Hung windows would stall the whole
+            // batch and are given their own async calls instead. Windows parked below the wallpaper
+            // for an Alt+Tab reveal come back at the top in icon order (last icon topmost, matching
+            // the activation choice); everything else keeps its stored z.
+            IntPtr batch = NM.BeginDeferWindowPos(hides.Count + shows.Count);
+            foreach (var h in hides)
+            {
+                if (batch != IntPtr.Zero && !NM.IsHungAppWindow(h))
+                    batch = NM.DeferWindowPos(batch, h, IntPtr.Zero, 0, 0, 0, 0,
+                        NM.SWP_HIDEWINDOW | NM.SWP_NOMOVE | NM.SWP_NOSIZE | NM.SWP_NOACTIVATE | NM.SWP_NOZORDER);
+                if (batch == IntPtr.Zero) NM.ShowWindowAsync(h, NM.SW_HIDE);
+            }
+            foreach (var w in shows)
+            {
+                bool repair = w.ZTrashed;
+                w.ZTrashed = false;
+                if (batch != IntPtr.Zero && !NM.IsHungAppWindow(w.Hwnd))
+                {
+                    batch = NM.DeferWindowPos(batch, w.Hwnd, repair ? NM.HWND_TOP : IntPtr.Zero, 0, 0, 0, 0,
+                        NM.SWP_SHOWWINDOW | NM.SWP_NOMOVE | NM.SWP_NOSIZE | NM.SWP_NOACTIVATE | (repair ? 0 : NM.SWP_NOZORDER));
+                    if (batch != IntPtr.Zero) continue;
+                }
+                NM.ShowWindowAsync(w.Hwnd, NM.SW_SHOWNA);
+                if (repair)
+                    NM.SetWindowPos(w.Hwnd, NM.HWND_TOP, 0, 0, 0, 0,
+                        NM.SWP_NOMOVE | NM.SWP_NOSIZE | NM.SWP_NOACTIVATE | NM.SWP_ASYNCWINDOWPOS);
+            }
+            if (batch != IntPtr.Zero) NM.EndDeferWindowPos(batch);
         }
 
-        private static void ShowWin(IntPtr h)
+        private static void ShowWin(WindowModel w)
         {
-            if (h == IntPtr.Zero || !NM.IsWindow(h)) return;
+            if (w == null || w.Hwnd == IntPtr.Zero || !NM.IsWindow(w.Hwnd)) return;
+            // A window parked below the wallpaper by an Alt+Tab reveal must come back on top, or it
+            // shows underneath the wallpaper and looks gone. Everything else keeps its stored z.
+            if (w.ZTrashed)
+            {
+                w.ZTrashed = false;
+                NM.SetWindowPos(w.Hwnd, NM.HWND_TOP, 0, 0, 0, 0,
+                    NM.SWP_SHOWWINDOW | NM.SWP_NOMOVE | NM.SWP_NOSIZE | NM.SWP_NOACTIVATE | NM.SWP_ASYNCWINDOWPOS);
+                return;
+            }
             // Async show avoids blocking on a hung target, and SHOWNA does not steal focus.
-            NM.ShowWindowAsync(h, NM.SW_SHOWNA);
+            NM.ShowWindowAsync(w.Hwnd, NM.SW_SHOWNA);
         }
 
         private static void HideWin(IntPtr h)

@@ -37,6 +37,10 @@ namespace MultiDesk.UI
             AllowDrop = true;
             DragOver += OnTileDragOver;
             Drop += OnTileDrop;
+            // If something steals the capture (a context menu, a system popup), forget the press so a
+            // stale flag cannot trigger a drag or click later. The drag path releases deliberately
+            // after setting _dragging, so it is unaffected.
+            LostMouseCapture += (s, e) => { if (!_dragging) _pressed = false; };
         }
 
         private void OnTileDragOver(object sender, DragEventArgs e)
@@ -99,6 +103,11 @@ namespace MultiDesk.UI
             _press = e.GetPosition(this);
             _pressed = true;
             _dragging = false;
+            // Capture so a fast pull keeps routing mouse moves here after the cursor leaves the tile.
+            // Without it, a quick grab often produced its first MouseMove when the cursor was already
+            // outside, so the drag never started and the release landed on the section behind as a
+            // plain desktop-switch click.
+            CaptureMouse();
         }
 
         private void OnMove(object sender, MouseEventArgs e)
@@ -111,6 +120,7 @@ namespace MultiDesk.UI
                 _dragging = true;
                 _hoverTimer.Stop();
                 PreviewPopup.HideCurrent();
+                if (IsMouseCaptured) ReleaseMouseCapture(); // the OLE drag takes over the input from here
                 var m = Model;
                 if (m != null)
                 {
@@ -128,14 +138,21 @@ namespace MultiDesk.UI
 
         private void OnUp(object sender, MouseButtonEventArgs e)
         {
-            if (_pressed && !_dragging)
+            // Decide the click before releasing capture, whose LostMouseCapture handler clears _pressed.
+            bool click = _pressed && !_dragging;
+            _pressed = false;
+            if (IsMouseCaptured) ReleaseMouseCapture();
+            if (click)
             {
-                var m = Model;
-                if (m != null) WindowActions.Toggle(m);
-                // Consume the click so the section behind does not also switch desktops.
+                // Only a release still over the tile is a click; a release elsewhere is an abandoned
+                // grab and must not fall through to the section as a desktop switch.
+                if (IsMouseOver)
+                {
+                    var m = Model;
+                    if (m != null) WindowActions.Toggle(m);
+                }
                 e.Handled = true;
             }
-            _pressed = false;
         }
 
         private void OnRightClick(object sender, MouseButtonEventArgs e)

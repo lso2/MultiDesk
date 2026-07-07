@@ -131,6 +131,18 @@ namespace MultiDesk.Interop
         [DllImport("user32.dll", SetLastError = true)]
         public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
 
+        // Deferred batches apply many show/hide/z changes in one visual update, so a desktop switch
+        // paints at once instead of windows disappearing one at a time.
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern IntPtr BeginDeferWindowPos(int nNumWindows);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern IntPtr DeferWindowPos(IntPtr hWinPosInfo, IntPtr hWnd, IntPtr hWndInsertAfter,
+            int x, int y, int cx, int cy, uint uFlags);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern bool EndDeferWindowPos(IntPtr hWinPosInfo);
+
         [DllImport("user32.dll", SetLastError = true)]
         public static extern bool MoveWindow(IntPtr hWnd, int X, int Y, int nWidth, int nHeight, bool bRepaint);
 
@@ -159,6 +171,7 @@ namespace MultiDesk.Interop
         public const uint SWP_NOZORDER = 0x0004;
         public const uint SWP_NOACTIVATE = 0x0010;
         public const uint SWP_SHOWWINDOW = 0x0040;
+        public const uint SWP_HIDEWINDOW = 0x0080;
         public const uint SWP_FRAMECHANGED = 0x0020;
         public const uint SWP_ASYNCWINDOWPOS = 0x4000;
 
