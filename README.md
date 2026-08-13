@@ -4,7 +4,7 @@
 ![.NET Framework](https://img.shields.io/badge/.NET%20Framework-4.8-512BD4.svg?logo=dotnet&logoColor=white)
 ![C#](https://img.shields.io/badge/C%23-7.3-239120.svg?logo=csharp&logoColor=white)
 ![UI](https://img.shields.io/badge/UI-WPF-1f6feb.svg)
-![Version](https://img.shields.io/badge/Version-2.4.2-success.svg)
+![Version](https://img.shields.io/badge/Version-2.9.17-success.svg)
 ![License](https://img.shields.io/badge/License-MIT-orange.svg)
 
 A lightweight Windows virtual-desktop sidebar and window manager. MultiDesk groups your open windows onto desktops shown as a slim docked bar, so you can switch contexts, preview windows on hover, and move or pin apps between desktops without the friction of Windows' built-in virtual desktops. Everything runs locally as a single tray app, and all settings stay in a plain JSON file on your computer.
