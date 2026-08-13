@@ -52,7 +52,7 @@
                     ValueChanged="OnIconChanged" PreviewMouseUp="OnSliderCommit" />
 
             <TextBlock Text="BEHAVIOR" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" Margin="0,18,0,8" />
-            <CheckBox x:Name="ChkAltTab" Content="Show all desktops' windows in Alt+Tab" Margin="0,5" />
+            <CheckBox x:Name="ChkAltTab" Content="Show every desktop's windows in Windows' own Alt+Tab" Margin="0,5" />
             <CheckBox x:Name="ChkAutoSwitch" Content="Follow focus across desktops" Margin="0,5" />
             <CheckBox x:Name="ChkRemember" Content="Remember window placement across restarts" Margin="0,5" />
             <CheckBox x:Name="ChkPersistPreviews" Content="Remember window previews (uses more memory)" Margin="0,5" />
@@ -63,8 +63,7 @@
             </Grid>
             <Slider x:Name="SldTrim" Minimum="1" Maximum="60" Margin="0,4,0,0"
                     ValueChanged="OnTrimChanged" PreviewMouseUp="OnSliderCommit" />
-            <CheckBox x:Name="ChkSwitcher" Content="Cross-desktop switcher hotkey (Ctrl+Alt+D)" Margin="0,10,0,5" />
-            <CheckBox x:Name="ChkStartup" Content="Start MultiDesk with Windows" Margin="0,5" />
+            <CheckBox x:Name="ChkStartup" Content="Start MultiDesk with Windows" Margin="0,10,0,5" />
 
             <TextBlock Text="BACKUP" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" Margin="0,18,0,8" />
             <StackPanel Orientation="Horizontal">

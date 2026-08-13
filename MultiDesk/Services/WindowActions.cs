@@ -16,9 +16,13 @@ namespace MultiDesk.Services
         public static void Activate(WindowModel w)
         {
             if (w == null) return;
-            // Desktop switch first and synchronously, so focus is set after the target is visible.
-            MultiDesk.App.Desktops?.SwitchTo(w.DesktopIndex, false);
-            ForceForeground(w.Hwnd);
+            try
+            {
+                // Desktop switch first and synchronously, so focus is set after the target is visible.
+                MultiDesk.App.Desktops?.SwitchTo(w.DesktopIndex, false);
+                ForceForeground(w.Hwnd);
+            }
+            catch (Exception ex) { Log.Error("activate", ex); }
         }
 
         /// <summary>Tile click behavior, decided from live window state so it never misfires on a stale
@@ -27,9 +31,13 @@ namespace MultiDesk.Services
         public static void Toggle(WindowModel w)
         {
             if (w == null || w.Hwnd == IntPtr.Zero || !NM.IsWindow(w.Hwnd)) return;
-            if (NM.IsIconic(w.Hwnd)) { Activate(w); return; }
-            if (w.IsActive) { Minimize(w.Hwnd); return; }
-            Activate(w);
+            try
+            {
+                if (NM.IsIconic(w.Hwnd)) { Activate(w); return; }
+                if (w.IsActive) { Minimize(w.Hwnd); return; }
+                Activate(w);
+            }
+            catch (Exception ex) { Log.Error("toggle", ex); }
         }
 
         /// <summary>Force a window to the foreground, defeating the foreground lock. This is the core of
@@ -39,6 +47,18 @@ namespace MultiDesk.Services
             if (hwnd == IntPtr.Zero || !NM.IsWindow(hwnd)) return;
             try
             {
+                // A hung window cannot run the focus dance below, and attaching this thread's input
+                // queue to a hung thread hangs this thread with it, which reads as the whole bar,
+                // and every desktop switch with it, freezing. One async show and one plain request
+                // are safe; whatever they miss is retried by the next real interaction once the
+                // window answers again.
+                if (NM.IsHungAppWindow(hwnd))
+                {
+                    NM.ShowWindowAsync(hwnd, NM.IsIconic(hwnd) ? NM.SW_RESTORE : NM.SW_SHOW);
+                    NM.SetForegroundWindow(hwnd);
+                    return;
+                }
+
                 if (NM.IsIconic(hwnd)) NM.ShowWindow(hwnd, NM.SW_RESTORE);
                 else NM.ShowWindow(hwnd, NM.SW_SHOW);
 
@@ -47,7 +67,8 @@ namespace MultiDesk.Services
 
                 uint thisThread = NM.GetCurrentThreadId();
                 uint dummy;
-                uint foreThread = fore != IntPtr.Zero ? NM.GetWindowThreadProcessId(fore, out dummy) : 0;
+                uint foreThread = fore != IntPtr.Zero && !NM.IsHungAppWindow(fore)
+                    ? NM.GetWindowThreadProcessId(fore, out dummy) : 0;
                 uint targetThread = NM.GetWindowThreadProcessId(hwnd, out dummy);
 
                 // Drop the foreground lock timeout so the request is honored, restored afterward.
@@ -84,10 +105,21 @@ namespace MultiDesk.Services
             catch (Exception ex) { Log.Error("ForceForeground", ex); }
         }
 
-        public static void Minimize(IntPtr h) { Safe(h, () => NM.ShowWindow(h, NM.SW_MINIMIZE)); }
+        // Minimizing or closing the active window hands Windows' own foreground to whatever it judges
+        // is next in line, which is not a desktop the user chose to visit. Focus-follow is suppressed
+        // for a moment so that automatic hand-off can never read as "switch desktops."
+        public static void Minimize(IntPtr h)
+        {
+            MultiDesk.App.Desktops?.SuppressFocusFollow();
+            Safe(h, () => NM.ShowWindow(h, NM.SW_MINIMIZE));
+        }
         public static void Maximize(IntPtr h) { Safe(h, () => NM.ShowWindow(h, NM.SW_MAXIMIZE)); }
         public static void Restore(IntPtr h) { Safe(h, () => NM.ShowWindow(h, NM.SW_RESTORE)); }
-        public static void Close(IntPtr h) { Safe(h, () => NM.PostMessage(h, NM.WM_CLOSE, IntPtr.Zero, IntPtr.Zero)); }
+        public static void Close(IntPtr h)
+        {
+            MultiDesk.App.Desktops?.SuppressFocusFollow();
+            Safe(h, () => NM.PostMessage(h, NM.WM_CLOSE, IntPtr.Zero, IntPtr.Zero));
+        }
 
         public static void SendToBottom(IntPtr h)
         {

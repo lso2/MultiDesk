@@ -4,6 +4,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.Serialization;
 using System.Windows.Media;
+using NM = MultiDesk.Interop.NativeMethods;
 
 namespace MultiDesk.Models
 {
@@ -47,9 +48,6 @@ namespace MultiDesk.Models
         [DataMember(Name = "startWithWindows", Order = 10)]
         public bool StartWithWindows { get; set; }
 
-        [DataMember(Name = "switcherHotkeyEnabled", Order = 11)]
-        public bool SwitcherHotkeyEnabled { get; set; }
-
         [DataMember(Name = "autoSwitchOnForeground", Order = 12)]
         public bool AutoSwitchOnForeground { get; set; } = true;
 
@@ -70,8 +68,14 @@ namespace MultiDesk.Models
         [DataMember(Name = "rememberPlacement", Order = 23)]
         public bool RememberPlacement { get; set; } = true;
 
-        // When on, every desktop's windows appear in the system Alt+Tab (revealed only while you hold
-        // Alt+Tab); picking one switches to its desktop. Off: Alt+Tab shows only the current desktop.
+        // When on, a window not on the active desktop is kept genuinely on screen in the Win32 sense
+        // (never SW_HIDE) but relocated to a coordinate outside every monitor's combined bounds, so it
+        // stays enumerable and composited, which is what lets the real, unmodified Windows Alt+Tab (and
+        // its live thumbnails) include every desktop's windows on its own, with nothing drawn by
+        // MultiDesk. A healing pass corrects it immediately if anything ever moves it back into view.
+        // Off: off-desktop windows are genuinely hidden instead (the simpler, zero-relocation mechanism
+        // every version of MultiDesk used before 2.9.2), so Alt+Tab behaves like plain Windows and shows
+        // only the current desktop's windows.
         [DataMember(Name = "altTabAllDesktops", Order = 25)]
         public bool AltTabAllDesktops { get; set; } = true;
 
@@ -244,16 +248,6 @@ namespace MultiDesk.Models
 
         public int DesktopIndex { get; set; }
 
-        // Runtime only: true while this window is parked (visible but placed under the wallpaper, or
-        // moved off-screen when the OS rejects sub-shell placement), so it stays in the system
-        // Alt+Tab list without appearing on screen. Unparking lifts it back to the top.
-        public bool Parked { get; set; }
-
-        // Runtime only: the window's real position before an off-screen park, restored on unpark.
-        public bool HasParkPos { get; set; }
-        public int ParkLeft { get; set; }
-        public int ParkTop { get; set; }
-
         private string _title;
         public string Title
         {
@@ -281,6 +275,27 @@ namespace MultiDesk.Models
             get { return _isAlwaysOnTop; }
             set { if (_isAlwaysOnTop != value) { _isAlwaysOnTop = value; Raise("IsAlwaysOnTop"); } }
         }
+
+        // Parking bookkeeping (see DesktopManager.Visibility.cs). ParkEscalation is the mechanism this
+        // window has earned: 0 = plain position move (default), 1 = atomic placement change (for
+        // windows that clamp position moves while maximized), 2 = a genuine hide, the last resort for
+        // windows that defeat both, which alone costs them their Alt+Tab entry while away. A window
+        // only ever moves up the ladder, and only by defeating the level below, verified against its
+        // real on-screen rectangle. ParkedWith records which mechanism is currently holding it
+        // (-1 = not parked). Neither is serialized; a restart recovers parked windows by recognizing
+        // the park coordinate itself.
+        internal int ParkEscalation { get; set; }
+        internal int ParkedWith { get; set; } = -1;
+
+        // The exact screen rectangle this window sat at when position-parked (ParkedWith 0), restored
+        // in full, size included, on return. Internal, not public: RECT nests inside the internal
+        // NativeMethods class, and a public property cannot expose a less accessible type.
+        internal NM.RECT SavedRect { get; set; }
+
+        // The full placement (normal/maximized state plus restore rectangle) captured when
+        // placement-parked (ParkedWith 1), so a maximized window re-maximizes onto its own monitor on
+        // return, exactly as it was.
+        internal NM.WINDOWPLACEMENT SavedPlacement { get; set; }
 
         private void Raise(string p)
         {

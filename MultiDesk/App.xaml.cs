@@ -26,13 +26,21 @@ namespace MultiDesk
         public static ThemeService Theme { get; private set; }
         public static DesktopManager Desktops { get; private set; }
         public static WindowTracker Tracker { get; private set; }
-        public static AltTabService AltTab { get; private set; }
 
         protected override void OnStartup(StartupEventArgs e)
         {
             base.OnStartup(e);
             Log.Init();
             Log.Info("MultiDesk starting.");
+
+            // A bug anywhere in the app used to be able to take the whole process down with it, which
+            // for a window manager means every window it had hidden for another desktop is stranded
+            // with nothing left running to ever show it again. These two handlers are the backstop: a
+            // fault on the interface thread is logged and swallowed so the process keeps running instead
+            // of dying, and a fault on any other thread is at least logged before the runtime's own
+            // handling of it proceeds, so what happened is never a mystery on the next launch.
+            DispatcherUnhandledException += OnDispatcherUnhandledException;
+            AppDomain.CurrentDomain.UnhandledException += OnDomainUnhandledException;
 
             try
             {
@@ -51,6 +59,17 @@ namespace MultiDesk
             }
         }
 
+        private void OnDispatcherUnhandledException(object sender, System.Windows.Threading.DispatcherUnhandledExceptionEventArgs e)
+        {
+            Log.Error("Unhandled interface-thread exception, MultiDesk kept running", e.Exception);
+            e.Handled = true;
+        }
+
+        private void OnDomainUnhandledException(object sender, UnhandledExceptionEventArgs e)
+        {
+            Log.Error("Unhandled exception outside the interface thread", e.ExceptionObject as Exception);
+        }
+
         private void StartApp()
         {
             Settings = new SettingsStore();
@@ -65,10 +84,6 @@ namespace MultiDesk
 
             Tracker = new WindowTracker(Desktops);
             Tracker.Start();
-
-            // Optional "Alt+Tab across desktops" key watcher. Installs only when the setting is on.
-            AltTab = new AltTabService(Settings);
-            AltTab.Apply();
 
             CreateTrayIcon();
 
@@ -147,6 +162,18 @@ namespace MultiDesk
         private void OnBarClosed(object sender, EventArgs e)
         {
             if (ReferenceEquals(_bar, sender)) _bar = null;
+#if DEBUG
+            // The real lock problem: ShutdownMode is OnExplicitShutdown, so in every build closing the
+            // bar (the X button, Alt+F4, or Visual Studio's Stop) only hides it and the process keeps
+            // running in the tray, exactly like clicking "Hide pane" would. That is correct for the
+            // installed app, which is meant to stay resident, but during development it means the debug
+            // exe is still running and holding its own file open, so the next build fails to overwrite
+            // it, no matter how the window was closed. A Debug build has no reason to stay resident
+            // once its only window is gone, so here, and only in Debug, closing the bar ends the process
+            // the same way an ordinary window's app does, which is what releases the exe. Release is
+            // untouched: the installed, always-on copy still only exits from "Exit MultiDesk".
+            if (Application.Current != null && !Application.Current.Dispatcher.HasShutdownStarted) Shutdown();
+#endif
         }
 
         private void ShowSettings()
@@ -178,7 +205,6 @@ namespace MultiDesk
 
             // Stop tracking first so no late event re-hides a window during teardown.
             try { Tracker?.Dispose(); } catch (Exception ex) { Log.Error("tracker dispose", ex); }
-            try { AltTab?.Dispose(); } catch (Exception ex) { Log.Error("alt-tab dispose", ex); }
             // Remember where each window sat so it can be restored on the next launch.
             try { Desktops?.SavePlacements(); } catch (Exception ex) { Log.Error("save placements", ex); }
             // Safety: never leave a managed window hidden on a desktop the user cannot reach.

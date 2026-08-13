@@ -77,10 +77,11 @@
     <Compile Include="Services\ProcessInfo.cs" />
     <Compile Include="Services\WindowTracker.cs" />
     <Compile Include="Services\DesktopManager.cs" />
+    <Compile Include="Services\DesktopManager.Foreground.cs" />
+    <Compile Include="Services\DesktopManager.Placements.cs" />
+    <Compile Include="Services\DesktopManager.Visibility.cs" />
     <Compile Include="Services\WindowActions.cs" />
     <Compile Include="Services\DockManager.cs" />
-    <Compile Include="Services\HotkeyService.cs" />
-    <Compile Include="Services\AltTabService.cs" />
     <Compile Include="Services\PreviewCache.cs" />
   </ItemGroup>
   <ItemGroup>
@@ -123,13 +124,6 @@
     </Page>
     <Compile Include="UI\PreviewPopup.xaml.cs">
       <DependentUpon>PreviewPopup.xaml</DependentUpon>
-    </Compile>
-    <Page Include="UI\SwitcherWindow.xaml">
-      <Generator>MSBuild:Compile</Generator>
-      <SubType>Designer</SubType>
-    </Page>
-    <Compile Include="UI\SwitcherWindow.xaml.cs">
-      <DependentUpon>SwitcherWindow.xaml</DependentUpon>
     </Compile>
     <Page Include="UI\SettingsWindow.xaml">
       <Generator>MSBuild:Compile</Generator>

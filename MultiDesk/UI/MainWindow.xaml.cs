@@ -27,7 +27,6 @@ namespace MultiDesk.UI
 
         private IntPtr _handle;
         private DockManager _dock;
-        private HotkeyService _hotkeys;
 
         private bool _dragging;
         private int _dragOffX, _dragOffY;
@@ -125,9 +124,6 @@ namespace MultiDesk.UI
             _dock = new DockManager(this, App.Settings);
             _dock.AttachHandle(_handle);
 
-            _hotkeys = new HotkeyService(_handle, App.Settings, ShowSwitcher);
-            _hotkeys.Apply();
-
             App.Settings.Changed += OnSettingsChanged;
             App.Settings.ThicknessChangedLive += OnThicknessLive;
 
@@ -189,7 +185,6 @@ namespace MultiDesk.UI
                 try
                 {
                     if (_dock != null) _dock.Apply();
-                    if (_hotkeys != null) _hotkeys.Apply();
                     UpdateOrientationAndGripper();
                     Dispatcher.BeginInvoke(new Action(RefillLayout), System.Windows.Threading.DispatcherPriority.Loaded);
                 }
@@ -415,8 +410,6 @@ namespace MultiDesk.UI
         }
 
         // ---- menus ---------------------------------------------------------
-        private void ShowSwitcher() { SwitcherWindow.ShowSingleton(); }
-
         private void OnCoffee(object sender, RoutedEventArgs e) { App.OpenSupportLink(); }
 
         // The header is the bar's window-control menu, the way a title bar's system menu works.
@@ -471,7 +464,6 @@ namespace MultiDesk.UI
         {
             try { App.Settings.Changed -= OnSettingsChanged; } catch { }
             try { App.Settings.ThicknessChangedLive -= OnThicknessLive; } catch { }
-            try { if (_hotkeys != null) _hotkeys.Dispose(); } catch { }
             try { if (_dock != null) _dock.Dispose(); } catch { }
             try { Close(); } catch (Exception ex) { Log.Error("bar close", ex); }
         }

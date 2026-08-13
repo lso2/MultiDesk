@@ -159,6 +159,7 @@ namespace MultiDesk.Interop
         public const int SW_SHOWNOACTIVATE = 4;
         public const int SW_SHOW = 5;
         public const int SW_MINIMIZE = 6;
+        public const int SW_SHOWMINNOACTIVE = 7;
         public const int SW_SHOWNA = 8;
         public const int SW_RESTORE = 9;
 
@@ -171,6 +172,7 @@ namespace MultiDesk.Interop
         public const uint SWP_NOMOVE = 0x0002;
         public const uint SWP_NOZORDER = 0x0004;
         public const uint SWP_NOACTIVATE = 0x0010;
+        public const uint SWP_NOOWNERZORDER = 0x0200;
         public const uint SWP_SHOWWINDOW = 0x0040;
         public const uint SWP_HIDEWINDOW = 0x0080;
         public const uint SWP_FRAMECHANGED = 0x0020;
@@ -243,11 +245,29 @@ namespace MultiDesk.Interop
         public const int ICON_SMALL2 = 2;
         public const uint SMTO_ABORTIFHUNG = 0x0002;
 
-        // ---- DWM cloak query ------------------------------------------------
+        // ---- DWM cloak query, uncloak repair, and per-window transition suppression ----------------
         [DllImport("dwmapi.dll")]
         public static extern int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out int pvAttribute, int cbAttribute);
 
+        [DllImport("dwmapi.dll")]
+        private static extern int DwmSetWindowAttribute(IntPtr hwnd, int dwAttribute, ref int pvAttribute, int cbAttribute);
+
         public const int DWMWA_CLOAKED = 14;
+        private const int DWMWA_CLOAK = 13;
+        private const int DWMWA_TRANSITIONS_FORCEDISABLED = 3;
+
+        /// <summary>Suppress (or restore) DWM's minimize/restore animations for one window, so a
+        /// minimize performed as off-desktop parking is not accompanied by a visible shrink flourish.
+        /// Documented attribute; best effort, harmless where unsupported.</summary>
+        public static void SetTransitionsDisabled(IntPtr hwnd, bool disabled)
+        {
+            try
+            {
+                int v = disabled ? 1 : 0;
+                DwmSetWindowAttribute(hwnd, DWMWA_TRANSITIONS_FORCEDISABLED, ref v, sizeof(int));
+            }
+            catch { }
+        }
 
         // ---- monitors -------------------------------------------------------
         [DllImport("user32.dll")]
@@ -347,7 +367,8 @@ namespace MultiDesk.Interop
         public const int WM_HOTKEY = 0x0312;
 
         // ---- low-level keyboard hook (optional Alt+Tab across desktops) -----
-        // Observes Alt+Tab without ever swallowing keys, so it cannot break the normal switcher.
+        // Swallows Tab and Escape only while a physically-held Alt confirms a real Alt+Tab gesture is
+        // in progress with all-desktops mode on, so it can never eat those keys anywhere else.
         public delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
 
         [DllImport("user32.dll", SetLastError = true)]
@@ -378,6 +399,8 @@ namespace MultiDesk.Interop
         public const int WM_SYSKEYDOWN = 0x0104;
         public const int WM_SYSKEYUP = 0x0105;
         public const int VK_TAB = 0x09;
+        public const int VK_ESCAPE = 0x1B;
+        public const int VK_SHIFT = 0x10;
         public const int VK_LMENU = 0xA4;
         public const int VK_RMENU = 0xA5;
 
@@ -467,5 +490,64 @@ namespace MultiDesk.Interop
             catch { }
             return false;
         }
+
+        // One-directional migration repair only, never a hiding mechanism: clears a stray DWM cloak flag
+        // a window can be left with if an earlier MultiDesk build that cloaked windows itself (since
+        // retired in favor of parking) was killed before it ever ran its own un-cloak or exit cleanup.
+        // Safe to call on a window that was never cloaked at all; DWM simply reports no change needed.
+        public static bool TryUncloak(IntPtr hwnd)
+        {
+            try
+            {
+                int off = 0;
+                return DwmSetWindowAttribute(hwnd, DWMWA_CLOAK, ref off, sizeof(int)) == 0;
+            }
+            catch { return false; }
+        }
+
+        // ---- window placement -----------------------------------------------------------------------
+        // Used ONLY to repair a minimized window's remembered restore rectangle in place (see
+        // DesktopManager.Visibility.cs). Never used to move or show a window: the showCmd field is a
+        // show-STATE command, so driving movement through it coerces a window's normal/maximized state,
+        // and rcNormalPosition is only the restore rectangle, which a maximized window's on-screen
+        // rectangle ignores entirely.
+        [StructLayout(LayoutKind.Sequential)]
+        public struct WINDOWPLACEMENT
+        {
+            public int length;
+            public int flags;
+            public int showCmd;
+            public POINT ptMinPosition;
+            public POINT ptMaxPosition;
+            public RECT rcNormalPosition;
+        }
+
+        [DllImport("user32.dll")]
+        public static extern bool GetWindowPlacement(IntPtr hWnd, ref WINDOWPLACEMENT lpwndpl);
+
+        [DllImport("user32.dll")]
+        public static extern bool SetWindowPlacement(IntPtr hWnd, ref WINDOWPLACEMENT lpwndpl);
+
+        // showCmd STATE value as reported by GetWindowPlacement for a maximized window (numerically
+        // the same as the SW_MAXIMIZE command verb, named separately because it is read as a state).
+        public const int SW_SHOWMAXIMIZED = 3;
+
+        // WINDOWPLACEMENT.flags bit: a minimized window carrying it restores to maximized, not
+        // normal, when next un-minimized.
+        public const int WPF_RESTORETOMAXIMIZED = 2;
+
+        /// <summary>A ready-to-fill WINDOWPLACEMENT with length set, which GetWindowPlacement requires.</summary>
+        public static WINDOWPLACEMENT NewPlacement()
+        {
+            WINDOWPLACEMENT p = new WINDOWPLACEMENT();
+            p.length = Marshal.SizeOf(typeof(WINDOWPLACEMENT));
+            return p;
+        }
+
+        // ---- virtual screen (the bounding rectangle of every monitor combined) ----------------------
+        public const int SM_XVIRTUALSCREEN = 76;
+        public const int SM_YVIRTUALSCREEN = 77;
+        public const int SM_CXVIRTUALSCREEN = 78;
+        public const int SM_CYVIRTUALSCREEN = 79;
     }
 }

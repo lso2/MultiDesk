@@ -10,10 +10,13 @@ using NM = MultiDesk.Interop.NativeMethods;
 namespace MultiDesk.UI
 {
     /// <summary>
-    /// Floating live preview shown on hover. For a window on the active desktop it composites a live
-    /// DWM thumbnail; for a window hidden on another desktop, which has no live surface, it shows the
-    /// large icon and title instead. One instance exists at a time, so the feature is light in memory.
-    /// The window is not layered, because DWM thumbnails do not render on layered windows.
+    /// Floating live preview shown on hover. DWM keeps compositing a window for as long as it stays
+    /// WS_VISIBLE, whether it is actually on screen or off screen only because it is parked
+    /// (DesktopManager.Visibility.cs), so either way this reads a live thumbnail straight from it; only
+    /// a window that fell back to a real hide, or one that is minimized, has no live surface left, and
+    /// falls back to its cached snapshot or, failing that, its icon and title. One instance exists at a
+    /// time, so the feature is light in memory. The window is not layered, because DWM thumbnails do
+    /// not render on layered windows.
     /// </summary>
     public partial class PreviewPopup : Window
     {
@@ -83,13 +86,15 @@ namespace MultiDesk.UI
                 NM.SetWindowPos(handle, NM.HWND_TOPMOST, x, y, popupW, popupH,
                     NM.SWP_NOACTIVATE | NM.SWP_SHOWWINDOW);
 
-            // A live DWM thumbnail only composites for a window that is actually on screen: the active
-            // desktop, visible, not minimized. For a hidden, other-desktop, or minimized window it renders
-            // an empty white rectangle, so for those show the icon and title instead.
-            bool onActive = App.Desktops != null && model.DesktopIndex == App.Desktops.ActiveIndex
-                            && NM.IsWindowVisible(model.Hwnd) && !NM.IsIconic(model.Hwnd);
+            // DWM keeps compositing a window for as long as it stays WS_VISIBLE, whether it is actually
+            // on screen right now or off screen only because it is parked (see
+            // DesktopManager.Visibility.cs): either way a live thumbnail can still be read from it.
+            // Only a window that fell back to a real hide, or one that is minimized, has no live
+            // surface, and only those fall back to the cached snapshot or icon below.
+            bool hasLiveSurface = model.Hwnd != IntPtr.Zero && NM.IsWindow(model.Hwnd)
+                                && NM.IsWindowVisible(model.Hwnd) && !NM.IsIconic(model.Hwnd);
             bool live = false;
-            if (onActive)
+            if (hasLiveSurface)
             {
                 try
                 {
@@ -103,7 +108,20 @@ namespace MultiDesk.UI
                             {
                                 int marg = (int)(8 * scale);
                                 int header = (int)(34 * scale);
-                                t.Place(marg, header, popupW - marg, popupH - marg);
+                                // DWM scales the source into the destination rectangle verbatim, so
+                                // handing it the whole content area stretches any window whose shape
+                                // differs from the popup's, a portrait window worst of all. Fit the
+                                // source's own aspect ratio into the available area and center it,
+                                // the same letterboxing the cached-snapshot path gets for free from
+                                // Stretch="Uniform".
+                                int availW = popupW - marg * 2;
+                                int availH = popupH - header - marg;
+                                double fit = Math.Min((double)availW / size.cx, (double)availH / size.cy);
+                                int tw = Math.Max(1, (int)(size.cx * fit));
+                                int th = Math.Max(1, (int)(size.cy * fit));
+                                int tx = marg + (availW - tw) / 2;
+                                int ty = header + (availH - th) / 2;
+                                t.Place(tx, ty, tx + tw, ty + th);
                                 _thumb = t;
                                 live = true;
                             }

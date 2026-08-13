@@ -28,13 +28,13 @@ namespace MultiDesk.UI
             ChkReserveSpace.Click += (s, e) => { Cur.ReserveSpace = ChkReserveSpace.IsChecked == true; Save(); };
             ChkShowCoffee.Click += (s, e) => { Cur.ShowCoffee = ChkShowCoffee.IsChecked == true; Save(); };
             ChkRemember.Click += (s, e) => { Cur.RememberPlacement = ChkRemember.IsChecked == true; Save(); };
-            // RefreshAll migrates the live windows between the two engines: parking (all-desktops) and
-            // hiding (single desktop), so the toggle takes effect without touching any window by hand.
-            ChkAltTab.Click += (s, e) => { Cur.AltTabAllDesktops = ChkAltTab.IsChecked == true; Save(); App.AltTab.Apply(); App.Desktops.RefreshAll(); };
+            // Flips between a real hide and off-screen parking. RefreshAll re-applies visibility under
+            // whichever mechanism the new value selects, and migrates any already-parked window back
+            // to a real position first if parking just turned off.
+            ChkAltTab.Click += (s, e) => { Cur.AltTabAllDesktops = ChkAltTab.IsChecked == true; Save(); App.Desktops.RefreshAll(); };
             ChkPersistPreviews.Click += (s, e) => { Cur.PersistPreviews = ChkPersistPreviews.IsChecked == true; Save(); if (!Cur.PersistPreviews) PreviewCache.Clear(); };
             ChkAutoSwitch.Click += (s, e) => { Cur.AutoSwitchOnForeground = ChkAutoSwitch.IsChecked == true; Save(); };
             ChkTrim.Click += (s, e) => { Cur.TrimHiddenMemory = ChkTrim.IsChecked == true; Save(); };
-            ChkSwitcher.Click += (s, e) => { Cur.SwitcherHotkeyEnabled = ChkSwitcher.IsChecked == true; Save(); };
             ChkStartup.Click += (s, e) => { Cur.StartWithWindows = ChkStartup.IsChecked == true; SetStartup(Cur.StartWithWindows); Save(); };
         }
 
@@ -62,7 +62,6 @@ namespace MultiDesk.UI
             ChkPersistPreviews.IsChecked = Cur.PersistPreviews;
             ChkAutoSwitch.IsChecked = Cur.AutoSwitchOnForeground;
             ChkTrim.IsChecked = Cur.TrimHiddenMemory;
-            ChkSwitcher.IsChecked = Cur.SwitcherHotkeyEnabled;
             ChkStartup.IsChecked = Cur.StartWithWindows;
 
             SldThickness.Value = Cur.BarThicknessPx;
@@ -194,7 +193,6 @@ namespace MultiDesk.UI
                 if (App.Settings.ImportFrom(dlg.FileName))
                 {
                     App.Desktops.ReloadFromSettings();
-                    App.AltTab.Apply();
                     LoadValues();
                     BackupStatus.Text = "Settings restored.";
                 }
