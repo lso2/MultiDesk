@@ -13,7 +13,7 @@ A lightweight Windows virtual-desktop sidebar and window manager for Windows. Mu
 
 ## Summary
 
-MultiDesk turns one cluttered taskbar into a set of focused desktops shown down the edge of your screen, with:
+MultiDesk turns a cluttered taskbar into a set of focused desktops shown down the edge of your screen, with:
 
 - **Managed virtual desktops** - Group windows into desktops; switching shows that desktop's windows and hides the rest
 - **Dockable sidebar** - Dock to any screen edge, float it, or auto-hide it to a thin trigger strip
