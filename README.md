@@ -9,7 +9,7 @@
 
 A lightweight Windows virtual-desktop sidebar and window manager for Windows. MultiDesk groups your open windows into desktops shown in a bar that autohides on any side of your screen, letting you switch desktops easily and quickly, peek to preview windows on hover, and move or pin apps between desktops. You can create as many desktops as you want, resize the pane, name the desktops, and even move the desktops around with drag and drop. 
 
-![Multi-desk sidebar](screens/multidesk-sidebar.jpg) 
+![Multi-desk dock](screens/multidesk-dock.jpg) 
 
 ## Summary
 
