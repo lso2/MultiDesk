@@ -35,6 +35,7 @@ namespace MultiDesk.Services
 
         public void Start()
         {
+            DiagChannels.Arm(DiagChannels.Track);
             _shell = NM.GetShellWindow();
 
             _debounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(180) };
@@ -165,6 +166,12 @@ namespace MultiDesk.Services
                 foreach (var h in dead) _desktops.RemoveWindow(h);
 
                 _desktops.HealVisibility();
+
+                // The heartbeat is also what gives the icon order and the active desktop a regular
+                // reading, so a change neither the user nor this code asked for is caught within half
+                // a second of happening rather than whenever something else happens to look.
+                DiagOrder.Sample(_desktops.Desktops);
+                DiagNav.SampleActive(_desktops.ActiveIndex);
             }
             catch (Exception ex) { Log.Error("tracker refresh", ex); }
         }

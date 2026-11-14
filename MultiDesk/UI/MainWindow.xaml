@@ -52,6 +52,22 @@
             </StackPanel>
         </Button>
 
+        <!-- Sits directly above the coffee row: a DockPanel gives the bottom edge to whichever
+             bottom-docked child is declared first, so a later one stacks above it. Hidden until a
+             newer release has actually been found. -->
+        <Button x:Name="UpdateBtn" DockPanel.Dock="Bottom" Click="OnUpdate" Cursor="Hand"
+                Style="{StaticResource AccentButton}" Visibility="Collapsed"
+                Padding="4,6" Margin="4,2,4,2">
+            <Button.ToolTip>
+                <ToolTip x:Name="UpdateTip" Content="A newer version is available." Style="{StaticResource BarTipStyle}" />
+            </Button.ToolTip>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                <TextBlock Text="&#xE896;" FontFamily="Segoe MDL2 Assets" FontSize="12" Foreground="White"
+                           VerticalAlignment="Center" Margin="0,0,5,0" />
+                <TextBlock Text="Update" FontSize="11" Foreground="White" VerticalAlignment="Center" />
+            </StackPanel>
+        </Button>
+
         <ScrollViewer x:Name="Scroller" VerticalScrollBarVisibility="Hidden"
                       HorizontalScrollBarVisibility="Disabled" Padding="0,2,0,2">
             <ItemsControl x:Name="SectionsHost" HorizontalContentAlignment="Stretch">

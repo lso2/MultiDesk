@@ -1,6 +1,24 @@
 # Changelog
 All notable changes to MultiDesk are recorded here. The major number marks a structural shift, the minor number marks a feature set, and the patch number marks fixes. The newest release is listed first.
 
+## [2.10.0] - 2026-09-14
+### Added
+- A navigation trace under `%APPDATA%\MultiDesk\logs` recording every desktop switch, foreground decision, park, restore, icon move and pane resize.
+- Anomalies written again to `bugs.log` on their own: an Alt+Tab commit that landed on another window, focus resting on a window no monitor shows, a maximized window returning at screen size without the maximized state, an icon slot or the pane changing with no cause on record, a desktop switch loop, and a park the window defeated.
+- A landing check that separates MultiDesk sending focus elsewhere from an app opening its own dialog, and from anything else taking focus while the switch settles.
+- Each branch of the foreground decision carries a name. A refused Alt+Tab records which guard refused it.
+- Focus is read back 550 ms after each decision, and a restored window 450 ms after it returns.
+- Deliberate reorders and resizes declare a cause, which is what separates them from the ones nobody asked for.
+- A Diagnostics section in settings with the recording toggle, a verbose toggle and a button that opens the log folder.
+- An update check against the GitHub releases API at launch and once a day, with an Update button above the coffee row.
+- The running version, shown under the settings window title.
+
+### Changed
+- The version number is set once in `AssemblyInfo.cs`. The settings window, the trace, the update check and the installer all read it from there.
+- The installer names its output `MultiDesk-<version>-release.exe` and packages Release when it is present, Debug otherwise.
+- The setup executable now carries its own version, product name, company and description in its file properties.
+- The deprecated `x64` architecture identifiers became `x64compatible`.
+
 ## [2.9.17] - 2026-08-06
 ### Fixed
 - Portrait windows were stretched in the hover preview: DWM scales a live thumbnail into whatever destination rectangle it is given, and the preview handed it the popup's whole content area regardless of the window's own shape, so anything taller than wide was squashed to fit. The preview now fits the source's true aspect ratio into the available area and centers it, the same letterboxing the cached-snapshot fallback always had. No parking change was involved; the earlier DPI diagnosis was wrong about where the stretching lived.

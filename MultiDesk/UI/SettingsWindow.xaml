@@ -6,7 +6,9 @@
         Background="{DynamicResource SidebarBackground}">
     <ScrollViewer x:Name="Scroller" VerticalScrollBarVisibility="Auto" PreviewMouseWheel="OnSettingsWheel">
         <StackPanel Margin="22">
-            <TextBlock Text="MultiDesk Settings" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,16" />
+            <TextBlock Text="MultiDesk Settings" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,2" />
+            <!-- Filled in from the running assembly, so it can never disagree with the file on disk. -->
+            <TextBlock x:Name="TxtVersion" FontSize="11" Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,16" />
 
             <TextBlock Text="APPEARANCE" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" Margin="0,4,0,8" />
             <CheckBox x:Name="ChkTitles" Content="Show desktop titles" Margin="0,5" />
@@ -64,6 +66,23 @@
             <Slider x:Name="SldTrim" Minimum="1" Maximum="60" Margin="0,4,0,0"
                     ValueChanged="OnTrimChanged" PreviewMouseUp="OnSliderCommit" />
             <CheckBox x:Name="ChkStartup" Content="Start MultiDesk with Windows" Margin="0,10,0,5" />
+
+            <TextBlock Text="UPDATES" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" Margin="0,18,0,8" />
+            <CheckBox x:Name="ChkAutoUpdates" Content="Check for new versions automatically" Margin="0,5" />
+            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                <Button x:Name="BtnCheckNow" Content="Check now" Width="104" Height="28" Margin="0,0,8,0" Click="OnCheckNow" />
+                <Button x:Name="BtnProjectPage" Content="Releases page" Width="118" Height="28" Click="OnProjectPage" />
+            </StackPanel>
+            <TextBlock x:Name="UpdateStatus" Foreground="{DynamicResource TextSecondary}" FontSize="11"
+                       Margin="0,6,0,0" TextWrapping="Wrap" />
+
+            <TextBlock Text="DIAGNOSTICS" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" Margin="0,18,0,8" />
+            <CheckBox x:Name="ChkDiagnostics" Content="Record a navigation trace" Margin="0,5" />
+            <CheckBox x:Name="ChkDiagVerbose" Content="Include heartbeat samples in the trace (larger files)" Margin="0,5" />
+            <Button x:Name="BtnOpenLogs" Content="Open log folder" Width="140" Height="28" HorizontalAlignment="Left"
+                    Margin="0,8,0,0" Click="OnOpenLogs" />
+            <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource TextSecondary}" FontSize="11" Margin="0,6,0,0"
+                       Text="Every desktop switch, Alt+Tab landing, park and restore, icon move and pane resize goes into a dated file under %APPDATA%\MultiDesk\logs, kept for two weeks. Anything measured to have happened with no cause on record is written again to bugs.log, which holds nothing else." />
 
             <TextBlock Text="BACKUP" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" Margin="0,18,0,8" />
             <StackPanel Orientation="Horizontal">

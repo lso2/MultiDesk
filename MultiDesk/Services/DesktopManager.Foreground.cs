@@ -85,6 +85,19 @@ namespace MultiDesk.Services
                 || c == "TaskListThumbnailWnd" || c == "Windows.UI.Core.CoreWindow";
         }
 
+        // The classes that are only ever the switcher itself. IsTaskChooser above is deliberately
+        // wider, since it decides an exemption where a false positive is harmless. This one decides
+        // whether the trace calls a foreground change a hand-picked Alt+Tab, where a false positive
+        // would put ordinary focus changes on record as faults, so it leaves out ForegroundStaging
+        // and Windows.UI.Core.CoreWindow, both of which ordinary windows also use.
+        private static bool IsAltTabCommit(IntPtr hwnd)
+        {
+            if (hwnd == IntPtr.Zero) return false;
+            var c = NM.ClassOf(hwnd);
+            return c == "XamlExplorerHostIslandWindow" || c == "MultitaskingViewFrame"
+                || c == "TaskSwitcherWnd" || c == "TaskListThumbnailWnd";
+        }
+
         /// <summary>Update the active-window highlight and, optionally, follow focus across desktops.</summary>
         public void SetForeground(IntPtr hwnd)
         {
@@ -100,6 +113,12 @@ namespace MultiDesk.Services
                 if (on) active = w;
             }
 
+            // The system task switcher held the foreground right up to this event, which makes this a
+            // window the user picked by hand in Alt+Tab. The trace carries that fact, so a landing
+            // somewhere else can be told apart from a hand-off Windows performed on its own. Read
+            // only while tracing is on: nothing outside the trace uses it.
+            bool viaChooser = Diag.Enabled && IsAltTabCommit(prevFg);
+
             // One-shot revert: an unrequested grab by a different tracked window right after focus was
             // placed deliberately gets pushed back once, which stops a media window from planting
             // itself in front the moment a switch shows or hides it.
@@ -107,11 +126,22 @@ namespace MultiDesk.Services
                 && Environment.TickCount < _fgGuardUntil && NM.IsWindow(_fgGuardHwnd))
             {
                 _fgGuardUsed = true;
+                DiagNav.Foreground(hwnd, active.Title, active.DesktopIndex, ActiveIndex,
+                    DiagNav.OutGuardRevert, viaChooser, _fgGuardHwnd, null);
                 WindowActions.ForceForeground(_fgGuardHwnd);
                 return;
             }
 
-            if (active == null || active.DesktopIndex == ActiveIndex) return;
+            if (active == null)
+            {
+                DiagNav.ForegroundQuiet(hwnd, -1, ActiveIndex, DiagNav.OutUntracked);
+                return;
+            }
+            if (active.DesktopIndex == ActiveIndex)
+            {
+                DiagNav.ForegroundQuiet(hwnd, active.DesktopIndex, ActiveIndex, DiagNav.OutSameDesktop);
+                return;
+            }
 
             // A window MultiDesk itself parked, at any level, taking the foreground is a
             // cross-desktop selection or a hand-off no matter what its current visual state reads
@@ -119,7 +149,17 @@ namespace MultiDesk.Services
             // this event arrives the window can look perfectly ordinary while still being a parked
             // window the user just chose. Routing every parked case through the stuck pipeline keeps
             // one set of guards (hand-off detection, loop breakers) deciding all of it.
-            bool stuckOffScreen = !OnScreen(hwnd) || active.ParkedWith >= 0;
+            bool onScreen = OnScreen(hwnd);
+            bool stuckOffScreen = !onScreen || active.ParkedWith >= 0;
+
+            // The readings every decision below is made from, built only while tracing is on so an
+            // ordinary foreground change costs nothing when it is off.
+            string state = Diag.Enabled
+                ? "onscreen=" + (onScreen ? "1" : "0")
+                    + " parked-with=" + active.ParkedWith + " escalation=" + active.ParkEscalation
+                    + " prev=" + DiagFormat.H(prevFg) + " prev-state=" + DiagFormat.Flags(prevFg)
+                    + " since-park=" + DiagFormat.Ms(_parkedFgAt)
+                : null;
 
             if (stuckOffScreen)
             {
@@ -132,7 +172,12 @@ namespace MultiDesk.Services
                 // rides along floods the input system. The window MultiDesk itself just parked
                 // while focused is therefore never followed: the switch that parked it already has
                 // a deliberate focus placement in flight, and doing nothing here lets it land.
-                if (hwnd == _parkedFgHwnd && Environment.TickCount - _parkedFgAt < 500) return;
+                if (hwnd == _parkedFgHwnd && Environment.TickCount - _parkedFgAt < 500)
+                {
+                    DiagNav.Foreground(hwnd, active.Title, active.DesktopIndex, ActiveIndex,
+                        DiagNav.OutSelfParkedFg, viaChooser, IntPtr.Zero, state);
+                    return;
+                }
 
                 // Parking or hiding the focused window also makes Windows hand the foreground to a
                 // successor of its own choosing within a few milliseconds, and with parked windows
@@ -143,6 +188,9 @@ namespace MultiDesk.Services
                 if (Environment.TickCount - _parkedFgAt < 250)
                 {
                     var steer = TopOfActiveDesktop(null);
+                    DiagNav.Foreground(hwnd, active.Title, active.DesktopIndex, ActiveIndex,
+                        DiagNav.OutHandoffPark, viaChooser,
+                        steer != null ? steer.Hwnd : IntPtr.Zero, state);
                     if (steer != null) WindowActions.ForceForeground(steer.Hwnd);
                     return;
                 }
@@ -159,6 +207,9 @@ namespace MultiDesk.Services
                 if (prevVanished && !IsTaskChooser(prevFg))
                 {
                     var steer = TopOfActiveDesktop(null);
+                    DiagNav.Foreground(hwnd, active.Title, active.DesktopIndex, ActiveIndex,
+                        DiagNav.OutHandoffVanished, viaChooser,
+                        steer != null ? steer.Hwnd : IntPtr.Zero, state);
                     if (steer != null) WindowActions.ForceForeground(steer.Hwnd);
                     return;
                 }
@@ -170,6 +221,9 @@ namespace MultiDesk.Services
                 if (Environment.TickCount < _stuckCooldownUntil)
                 {
                     var t = TopOfActiveDesktop(null);
+                    DiagNav.Foreground(hwnd, active.Title, active.DesktopIndex, ActiveIndex,
+                        DiagNav.OutBreakerCooldown, viaChooser, t != null ? t.Hwnd : IntPtr.Zero,
+                        state + " cooldown-remaining=" + (_stuckCooldownUntil - Environment.TickCount) + "ms");
                     if (t != null) WindowActions.ForceForeground(t.Hwnd);
                     return;
                 }
@@ -185,11 +239,18 @@ namespace MultiDesk.Services
             // the active desktop instead.
             if (Environment.TickCount < _suppressFocusFollowUntil)
             {
+                string left = " suppress-remaining=" + (_suppressFocusFollowUntil - Environment.TickCount) + "ms";
                 if (stuckOffScreen)
                 {
                     var top = TopOfActiveDesktop(null);
+                    DiagNav.Foreground(hwnd, active.Title, active.DesktopIndex, ActiveIndex,
+                        DiagNav.OutSuppressedSteer, viaChooser, top != null ? top.Hwnd : IntPtr.Zero,
+                        state + left);
                     if (top != null) WindowActions.ForceForeground(top.Hwnd);
+                    return;
                 }
+                DiagNav.Foreground(hwnd, active.Title, active.DesktopIndex, ActiveIndex,
+                    DiagNav.OutSuppressed, viaChooser, IntPtr.Zero, state + left);
                 return;
             }
 
@@ -199,7 +260,12 @@ namespace MultiDesk.Services
             // notification activating itself, a relaunch of a single-instance app) is corrected
             // regardless of that setting, because a window cannot usefully stay both foreground and
             // off screen.
-            if (!stuckOffScreen && !_settings.Current.AutoSwitchOnForeground) return;
+            if (!stuckOffScreen && !_settings.Current.AutoSwitchOnForeground)
+            {
+                DiagNav.Foreground(hwnd, active.Title, active.DesktopIndex, ActiveIndex,
+                    DiagNav.OutNoFollowSetting, viaChooser, IntPtr.Zero, state);
+                return;
+            }
             // A second top-level window of a process that already has a window on the active desktop
             // is reunited here instead of switching the desktop to wherever it was tracked, so an
             // IDE's floating tool panel, a file picker, or a secondary frame taking focus cannot pull
@@ -212,8 +278,20 @@ namespace MultiDesk.Services
             // so reuniting it would relocate a window the user placed, which is exactly the
             // windows-migrate-to-the-current-desktop bug. Windows move desktops when the user moves
             // them, never as a side effect of focus.
-            if (!ParkingEnabled && !stuckOffScreen && TryReuniteSibling(active)) { WindowActions.ForceForeground(hwnd); return; }
-            if (!stuckOffScreen && Environment.TickCount < _switchGuardUntil) return;
+            if (!ParkingEnabled && !stuckOffScreen && TryReuniteSibling(active))
+            {
+                DiagNav.Foreground(hwnd, active.Title, active.DesktopIndex, ActiveIndex,
+                    DiagNav.OutReunited, viaChooser, hwnd, state);
+                WindowActions.ForceForeground(hwnd);
+                return;
+            }
+            if (!stuckOffScreen && Environment.TickCount < _switchGuardUntil)
+            {
+                DiagNav.Foreground(hwnd, active.Title, active.DesktopIndex, ActiveIndex,
+                    DiagNav.OutSwitchGuard, viaChooser, IntPtr.Zero,
+                    state + " guard-remaining=" + (_switchGuardUntil - Environment.TickCount) + "ms");
+                return;
+            }
             if (stuckOffScreen)
             {
                 // Trip the breaker on the fourth stuck-driven switch inside one second: a person
@@ -224,12 +302,17 @@ namespace MultiDesk.Services
                     _stuckCooldownUntil = now + 1200;
                     Log.Info("Stuck-switch circuit breaker tripped; stuck foreground events ignored for 1.2s.");
                     var t = TopOfActiveDesktop(null);
+                    DiagNav.Foreground(hwnd, active.Title, active.DesktopIndex, ActiveIndex,
+                        DiagNav.OutBreakerTrip, viaChooser, t != null ? t.Hwnd : IntPtr.Zero,
+                        state + " four-switches-within=" + (now - _stuckSwitch3) + "ms");
                     if (t != null) WindowActions.ForceForeground(t.Hwnd);
                     return;
                 }
                 _stuckSwitch3 = _stuckSwitch2; _stuckSwitch2 = _stuckSwitch1; _stuckSwitch1 = now;
             }
-            SwitchTo(active.DesktopIndex, false);
+            DiagNav.Foreground(hwnd, active.Title, active.DesktopIndex, ActiveIndex,
+                DiagNav.OutSwitched, viaChooser, IntPtr.Zero, state);
+            SwitchTo(active.DesktopIndex, false, true, viaChooser ? "alt-tab-commit" : "focus-follow");
             WindowActions.ForceForeground(hwnd);
         }
 

@@ -48,6 +48,10 @@ namespace MultiDesk.UI
         // Actual width available to the icon grid, used to snap the bar to whole columns accurately.
         public double IconAreaViewportWidth { get { return TilesScroller != null ? TilesScroller.ViewportWidth : 0; } }
 
+        // The same measurement on the other axis, which is the one icons wrap along when the bar is
+        // docked top or bottom.
+        public double IconAreaViewportHeight { get { return TilesScroller != null ? TilesScroller.ViewportHeight : 0; } }
+
         private void OnLoaded(object sender, RoutedEventArgs e)
         {
             ApplyLayout();
@@ -262,6 +266,7 @@ namespace MultiDesk.UI
         // Drag the divider under a desktop to set just that desktop's height, down to a single row.
         private void OnSectionGripDown(object sender, MouseButtonEventArgs e)
         {
+            DiagPane.Declare("section-grip-drag");
             NM.POINT p;
             if (!NM.GetCursorPos(out p)) return;
             var m = Model;

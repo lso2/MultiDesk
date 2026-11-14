@@ -36,6 +36,31 @@ namespace MultiDesk.UI
             ChkAutoSwitch.Click += (s, e) => { Cur.AutoSwitchOnForeground = ChkAutoSwitch.IsChecked == true; Save(); };
             ChkTrim.Click += (s, e) => { Cur.TrimHiddenMemory = ChkTrim.IsChecked == true; Save(); };
             ChkStartup.Click += (s, e) => { Cur.StartWithWindows = ChkStartup.IsChecked == true; SetStartup(Cur.StartWithWindows); Save(); };
+
+            ChkAutoUpdates.Click += (s, e) => { Cur.AutoCheckUpdates = ChkAutoUpdates.IsChecked == true; Save(); ShowUpdateStatus(); };
+            // The trace flags reach the writer directly as well as the file, so turning the trace on
+            // starts recording from the next event instead of the next launch.
+            ChkDiagnostics.Click += (s, e) =>
+            {
+                Cur.Diagnostics = ChkDiagnostics.IsChecked == true;
+                Diag.Enabled = Cur.Diagnostics;
+                if (Cur.Diagnostics) DiagSession.Open(Cur);
+                Save();
+            };
+            ChkDiagVerbose.Click += (s, e) =>
+            {
+                Cur.DiagnosticsVerbose = ChkDiagVerbose.IsChecked == true;
+                Diag.Verbose = Cur.DiagnosticsVerbose;
+                Save();
+            };
+
+            if (App.Updates != null) App.Updates.Changed += OnUpdatesChanged;
+            Closed += (s, e) => { if (App.Updates != null) App.Updates.Changed -= OnUpdatesChanged; };
+        }
+
+        private void OnUpdatesChanged(object sender, EventArgs e)
+        {
+            Dispatcher.BeginInvoke(new Action(ShowUpdateStatus));
         }
 
         public static void ShowSingleton()
@@ -70,6 +95,12 @@ namespace MultiDesk.UI
             TxtIcon.Text = Cur.IconSizePx + " px";
             SldTrim.Value = Cur.TrimDelayMs / 1000.0;
             TxtTrim.Text = (Cur.TrimDelayMs / 1000) + " s";
+
+            TxtVersion.Text = "Version " + AppVersion.Display;
+            ChkAutoUpdates.IsChecked = Cur.AutoCheckUpdates;
+            ChkDiagnostics.IsChecked = Cur.Diagnostics;
+            ChkDiagVerbose.IsChecked = Cur.DiagnosticsVerbose;
+            ShowUpdateStatus();
 
             UpdateThemeButtons();
             UpdateEdgeButtons();
@@ -201,6 +232,37 @@ namespace MultiDesk.UI
         }
 
         private void OnCoffee(object sender, RoutedEventArgs e) { App.OpenSupportLink(); }
+
+        // ---- updates and diagnostics ---------------------------------------
+        private void OnCheckNow(object sender, RoutedEventArgs e)
+        {
+            if (App.Updates == null) return;
+            UpdateStatus.Text = "Checking...";
+            App.Updates.CheckNow();
+        }
+
+        private void OnProjectPage(object sender, RoutedEventArgs e) { App.OpenProjectLink(); }
+
+        private void OnOpenLogs(object sender, RoutedEventArgs e) { App.OpenDiagnosticFolder(); }
+
+        private void ShowUpdateStatus()
+        {
+            var svc = App.Updates;
+            if (svc == null) { UpdateStatus.Text = ""; return; }
+            if (!Cur.AutoCheckUpdates && svc.LatestVersion == null)
+            {
+                UpdateStatus.Text = "Automatic checks are off. Use Check now for a one-off answer.";
+                return;
+            }
+            if (svc.UpdateAvailable)
+            {
+                UpdateStatus.Text = "MultiDesk " + svc.LatestVersion + " is available on the releases page.";
+                return;
+            }
+            UpdateStatus.Text = svc.LatestVersion != null
+                ? "Version " + AppVersion.Display + " is the newest published release."
+                : "No published release has been read yet.";
+        }
 
         // Fixed, gentle wheel step of 24 px per notch. Default handling multiplies the OS wheel-lines
         // setting into jumps that overshoot whole sections in a panel this dense.

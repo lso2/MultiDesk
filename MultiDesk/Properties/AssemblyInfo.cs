@@ -17,5 +17,8 @@ using System.Windows;
     ResourceDictionaryLocation.None,
     ResourceDictionaryLocation.SourceAssembly)]
 
-[assembly: AssemblyVersion("1.0.0.0")]
-[assembly: AssemblyFileVersion("1.0.0.0")]
+// The one place the version is written. Services\AppVersion.cs reads it off the running assembly,
+// the settings window and the trace header print what it reads, the update check compares against it,
+// and Installer.iss takes it from the built executable rather than carrying its own copy.
+[assembly: AssemblyVersion("2.10.0.0")]
+[assembly: AssemblyFileVersion("2.10.0.0")]

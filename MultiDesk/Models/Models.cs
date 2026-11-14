@@ -113,6 +113,21 @@ namespace MultiDesk.Models
         [DataMember(Name = "appPins", Order = 18, EmitDefaultValue = false)]
         public List<AppPin> AppPins { get; set; }
 
+        // Writes the navigation trace under %APPDATA%\MultiDesk\logs. Left on by default: the faults
+        // worth catching are the intermittent ones, which are only ever on record if recording was
+        // already running when they happened.
+        [DataMember(Name = "diagnostics", Order = 19)]
+        public bool Diagnostics { get; set; } = true;
+
+        // Adds the per-heartbeat samples and the faithful-restore confirmations to the trace. Off by
+        // default, since those lines outnumber the events worth reading by a wide margin.
+        [DataMember(Name = "diagnosticsVerbose", Order = 20)]
+        public bool DiagnosticsVerbose { get; set; }
+
+        // Asks the GitHub releases API whether a newer version exists, at launch and once a day after.
+        [DataMember(Name = "autoCheckUpdates", Order = 21)]
+        public bool AutoCheckUpdates { get; set; } = true;
+
         // GetUninitializedObject during deserialization skips field initializers, so restore the
         // non-false/non-zero defaults before members load.
         [OnDeserializing]
@@ -138,6 +153,8 @@ namespace MultiDesk.Models
             PersistPreviews = true;
             FloatLeft = 80;
             FloatTop = 80;
+            Diagnostics = true;
+            AutoCheckUpdates = true;
             SchemaVersion = 0; // old files lack this, so they read as 0 and migrate
         }
 

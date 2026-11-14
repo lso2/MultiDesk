@@ -53,8 +53,53 @@ namespace MultiDesk.UI
             // changes do), the bar snapped back to that stale startup width, which showed up as the
             // sidebar shrinking to one column after toggling a settings checkbox. Keeping the cache in
             // step with the real size makes any re-assert a no-op.
-            SizeChanged += (s, e) => { Width = e.NewSize.Width; Height = e.NewSize.Height; };
+            SizeChanged += (s, e) => { Width = e.NewSize.Width; Height = e.NewSize.Height; SampleGeometry(); };
+            LocationChanged += (s, e) => SampleGeometry();
+            if (App.Updates != null) App.Updates.Changed += OnUpdateStateChanged;
         }
+
+        // Read the bar's real rectangle and the icon grid's fit. A change with no cause declared by
+        // the code that performs deliberate resizes is what the pane channel is watching for.
+        private void SampleGeometry()
+        {
+            if (!Diag.Enabled) return; // a size event arrives on every frame of a drag
+            try
+            {
+                var s = App.Settings.Current;
+                bool vertical = s.IsVerticalEdge;
+                var sec = FirstSection(SectionsHost);
+                double viewport = 0;
+                if (sec != null) viewport = vertical ? sec.IconAreaViewportWidth : sec.IconAreaViewportHeight;
+                double scale = 1.0;
+                try { scale = VisualTreeHelper.GetDpi(this).DpiScaleX; } catch { }
+                DiagPane.Sample(_handle, s.BarThicknessPx, s.DockEdge, viewport, MeasuredCellDip(), scale);
+            }
+            catch (Exception ex) { Log.Error("pane geometry sample", ex); }
+        }
+
+        private void OnUpdateStateChanged(object sender, EventArgs e)
+        {
+            Dispatcher.BeginInvoke(new Action(ApplyUpdateButton));
+        }
+
+        // The button appears only on a vertical bar, the same rule the coffee row follows, because a
+        // bar docked top or bottom has no room for a stacked row.
+        private void ApplyUpdateButton()
+        {
+            try
+            {
+                var svc = App.Updates;
+                bool vertical = App.Settings.Current.IsVerticalEdge;
+                bool show = vertical && svc != null && svc.UpdateAvailable;
+                UpdateBtn.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+                if (show && UpdateTip != null)
+                    UpdateTip.Content = "MultiDesk " + (svc.LatestVersion ?? "") + " is available. Click to open the releases page.";
+                RefillLayout();
+            }
+            catch (Exception ex) { Log.Error("update button", ex); }
+        }
+
+        private void OnUpdate(object sender, RoutedEventArgs e) { App.OpenProjectLink(); }
 
         private bool _widthSnapped;
         private int _snapAttempts;
@@ -64,6 +109,7 @@ namespace MultiDesk.UI
             // Tell the desktops how much height they have, so sections auto-fill it.
             App.Desktops.NotifyLayout(e.NewSize.Height - 4);
             if (!_widthSnapped) TrySnapWidth();
+            SampleGeometry();
         }
 
         // Re-measure the scroll area and re-fill the sections to its real height. Used after the coffee
@@ -104,6 +150,10 @@ namespace MultiDesk.UI
             _widthSnapped = true;
             if (Math.Abs(nt - App.Settings.Current.BarThicknessPx) >= 1)
             {
+                DiagPane.Declare("whole-column-snap");
+                Diag.Write(DiagChannels.Pane, "column-snap", "viewport=" + vpDip.ToString("0.0")
+                    + "dip cell=" + cellDip.ToString("0.0") + "dip columns=" + cols
+                    + " thickness=" + App.Settings.Current.BarThicknessPx + "px->" + nt + "px scale=" + scale.ToString("0.00"));
                 App.Settings.Current.BarThicknessPx = nt;
                 if (_dock != null) _dock.Apply();
             }
@@ -150,6 +200,7 @@ namespace MultiDesk.UI
                 {
                     _widthSnapped = false;
                     _snapAttempts = 12; // permit the estimate fallback if no tile ever rendered
+                    DiagPane.Declare("startup-column-snap");
                     TrySnapWidth();
                     RefillLayout();
                     t.Stop();
@@ -175,6 +226,7 @@ namespace MultiDesk.UI
 
         private void OnThicknessLive(object sender, EventArgs e)
         {
+            DiagPane.Declare("thickness-slider");
             if (_dock != null) _dock.ResizeLive(App.Settings.Current.BarThicknessPx);
         }
 
@@ -184,6 +236,7 @@ namespace MultiDesk.UI
             {
                 try
                 {
+                    DiagPane.Declare("settings-changed");
                     if (_dock != null) _dock.Apply();
                     UpdateOrientationAndGripper();
                     Dispatcher.BeginInvoke(new Action(RefillLayout), System.Windows.Threading.DispatcherPriority.Loaded);
@@ -207,6 +260,7 @@ namespace MultiDesk.UI
 
             // The coffee button shows at the bottom of a vertical bar, hideable in settings.
             CoffeeBtn.Visibility = (vertical && App.Settings.Current.ShowCoffee) ? Visibility.Visible : Visibility.Collapsed;
+            ApplyUpdateButton();
 
             // Inner-edge resize handle: a vertical bar for side docks, a horizontal bar for top/bottom.
             Gripper.Visibility = Visibility.Visible;
@@ -381,6 +435,7 @@ namespace MultiDesk.UI
                 int rawh = edge == "bottom" ? _resizeStartThickness - dyh : _resizeStartThickness + dyh;
                 if (rawh < 56) rawh = 56;
                 if (rawh > 400) rawh = 400;
+                DiagPane.Declare("edge-grip-drag");
                 App.Settings.Current.BarThicknessPx = rawh;
                 if (_dock != null) _dock.ResizeLive(rawh);
                 return;
@@ -396,6 +451,7 @@ namespace MultiDesk.UI
             int nt = (int)Math.Round((_resizeChromeDip + cols * cellDip) * _resizeScale);
             if (nt < 56) nt = 56;
             if (nt > 400) nt = 400;
+            DiagPane.Declare("edge-grip-drag");
             App.Settings.Current.BarThicknessPx = nt;
             if (_dock != null) _dock.ResizeLive(nt); // single cheap move, no AppBar round-trip
         }
@@ -464,6 +520,9 @@ namespace MultiDesk.UI
         {
             try { App.Settings.Changed -= OnSettingsChanged; } catch { }
             try { App.Settings.ThicknessChangedLive -= OnThicknessLive; } catch { }
+            // The bar is recreated whenever it is reopened from the tray, so the closed one lets go
+            // of the update service it subscribed to when it was built.
+            try { if (App.Updates != null) App.Updates.Changed -= OnUpdateStateChanged; } catch { }
             try { if (_dock != null) _dock.Dispose(); } catch { }
             try { Close(); } catch (Exception ex) { Log.Error("bar close", ex); }
         }

@@ -16,8 +16,9 @@ There are no NuGet packages to restore, because the project references only fram
 
 Package the build into a single setup executable.
 
-- Build `MultiDesk.sln` in Release x64 first so `MultiDesk.exe` exists.
-- Open `Installer.iss` in Inno Setup and press Compile, which produces `Output\MultiDeskSetup.exe`.
+- Build `MultiDesk.sln` for x64 first so `MultiDesk.exe` exists. Release is packaged when it is present and Debug otherwise.
+- Open `Installer.iss` in Inno Setup and press Compile, which produces `Output\MultiDesk-<version>-release.exe`.
+- The version in the file name, in Add or remove programs, and in the setup executable's own properties is read off the executable that was built. The compiler prints which build and which version it packaged. Neither build being present stops the compile with a message saying so.
 - The setup installs to the per-user app folder without administrator rights, adds a startup entry, and launches MultiDesk.
 
 You can also just run `MultiDesk.exe` directly without installing.

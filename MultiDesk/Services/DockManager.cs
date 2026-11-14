@@ -63,6 +63,7 @@ namespace MultiDesk.Services
         public void Apply()
         {
             if (_h == IntPtr.Zero) return;
+            DiagPane.Declare("dock-apply");
             string edge = _s.Current.DockEdge;
             bool autoHide = _s.Current.AutoHide && edge != "float";
             bool reserve = _s.Current.ReserveSpace;
@@ -124,6 +125,7 @@ namespace MultiDesk.Services
 
         private void SetReservedPosition()
         {
+            DiagPane.Declare("appbar-reserved-position");
             if (_h == IntPtr.Zero || !_appbarRegistered) return;
             int t = _s.Current.BarThicknessPx;
             int sw = NM.GetSystemMetrics(NM.SM_CXSCREEN);
@@ -177,6 +179,7 @@ namespace MultiDesk.Services
         private void SetStrip(bool expanded)
         {
             if (_h == IntPtr.Zero) return;
+            DiagPane.Declare(expanded ? "auto-hide-expand" : "auto-hide-collapse");
             int t = _s.Current.BarThicknessPx;
             int sw = NM.GetSystemMetrics(NM.SM_CXSCREEN);
             int sh = NM.GetSystemMetrics(NM.SM_CYSCREEN);
@@ -234,6 +237,7 @@ namespace MultiDesk.Services
         // ---- floating ------------------------------------------------------
         private void ApplyFloat()
         {
+            DiagPane.Declare("float-position");
             _w.Topmost = _s.Current.AlwaysOnTop;
             int t = _s.Current.BarThicknessPx;
             int sh = NM.GetSystemMetrics(NM.SM_CYSCREEN);
@@ -257,6 +261,7 @@ namespace MultiDesk.Services
 
         public void MoveFloat(int x, int y)
         {
+            DiagPane.Declare("float-drag");
             if (_h == IntPtr.Zero) return;
             NM.SetWindowPos(_h, IntPtr.Zero, x, y, 0, 0, NM.SWP_NOSIZE | NM.SWP_NOZORDER | NM.SWP_NOACTIVATE);
         }
@@ -287,6 +292,7 @@ namespace MultiDesk.Services
         public void ResizeLive(int thickness)
         {
             if (_h == IntPtr.Zero) return;
+            DiagPane.Declare("resize-live");
             if (thickness < 56) thickness = 56;
             if (thickness > 400) thickness = 400;
             int sw = NM.GetSystemMetrics(NM.SM_CXSCREEN);
@@ -315,6 +321,7 @@ namespace MultiDesk.Services
         /// <summary>Finalize a resize by reasserting the AppBar reservation once.</summary>
         public void CommitResize()
         {
+            DiagPane.Declare("resize-committed");
             if (_edge == "float") return;
             if (_autoHide) SetStrip(_expanded);
             else SetReservedPosition();

@@ -7,40 +7,12 @@ namespace MultiDesk.Services
 {
     /// <summary>
     /// The visibility engine. Every window not on the active desktop must never be seen on screen,
-    /// under any circumstance: that invariant is never relaxed by anything below. How it is enforced
-    /// depends on settings.AltTabAllDesktops.
-    ///
-    /// Off: a real hide (SW_HIDE), the pre-2.9.2 mechanism. Nothing can draw a hidden window, and the
-    /// system Alt+Tab shows only the active desktop, like plain Windows.
-    ///
-    /// On: windows are parked instead of hidden. A parked window stays WS_VISIBLE, relocated far below
-    /// its own monitor's column, which is what lets the real, unmodified Windows Alt+Tab list every
-    /// desktop's windows with live thumbnails, nothing drawn by MultiDesk. Parking below the window's
-    /// OWN column matters: the nearest monitor to the park spot is then the window's own, so
-    /// per-monitor-DPI windows receive no DPI change while parked, which is what used to return
-    /// portrait windows stretched to the wrong proportions when the park spot sat beside a
-    /// different-DPI monitor.
-    ///
-    /// Some windows defeat a plain position move: a window can clamp the move to nothing inside its
-    /// own message handling while the call reports success, and maximized or fullscreen browser
-    /// windows, which re-derive their geometry from their monitor, can also revert an off-screen
-    /// placement later. So every park is VERIFIED against the real on-screen rectangle, and each
-    /// window earns its own mechanism on a three-step ladder, escalating only by defeating the level
-    /// below. Level 0, a pure position move, size and state untouched. Level 1, one atomic placement
-    /// change that restores the window to normal state DIRECTLY INTO the off-screen spot (it is never
-    /// visible un-maximized on screen) and re-maximizes it onto its own monitor in one call on
-    /// return; the window stays WS_VISIBLE and live in Alt+Tab throughout. Level 2, a minimize with
-    /// that window's DWM animation suppressed: invisible like everything minimized, yet STILL LISTED
-    /// in the real Alt+Tab, and restored natively on return, where Windows itself rebuilds maximized
-    /// or fullscreen geometry from the monitor, exactly. No level removes a window from the switcher;
-    /// escalations are logged with the window's title.
-    ///
-    /// A window found minimized is left alone, already off screen and correct in Alt+Tab. A window
-    /// minimized while parked gets its remembered restore rectangle repaired in place, staying
-    /// minimized, so un-minimizing later lands at its true position. Hung windows are skipped, not
-    /// stalled on; the heal pass retries once they answer. A parked window's way back lives only in
-    /// this process's memory, so a window found standing at the park spot with no capture to its name
-    /// (a killed session) is given a centered position at its own size rather than left stranded.
+    /// under any circumstance: that invariant is never relaxed by anything below. Settings
+    /// AltTabAllDesktops selects the mechanism, a real hide when off and off-screen parking when on.
+    /// Defines the park ladder (Park, Unpark), the on-screen guarantee (EnsureOnScreen, ShowWin,
+    /// HideWin), the repair pass (HealVisibility) and the one entry point a switch calls
+    /// (ApplyVisibility).
+    /// Doc: docs/notes/MultiDesk/Services/DesktopManager.Visibility.cs.md
     /// </summary>
     public sealed partial class DesktopManager
     {
@@ -117,6 +89,7 @@ namespace MultiDesk.Services
             bool park = ParkingEnabled;
             if (_lastParkingEnabled.HasValue && _lastParkingEnabled.Value && !park)
             {
+                _switchCause = "park-mode-turned-off";
                 foreach (var w in _byHwnd.Values)
                 {
                     if (w.ParkedWith >= 0) Unpark(w);
@@ -164,6 +137,11 @@ namespace MultiDesk.Services
 
                 if (toHide.Count == 0 && toShow.Count == 0) return;
 
+                Diag.Write(DiagChannels.Nav, "visibility-applied", "active=" + ActiveIndex
+                    + " mode=" + (park ? "park" : "hide")
+                    + " away=" + toHide.Count + " back=" + toShow.Count
+                    + " cause=" + (_switchCause ?? "unspecified"));
+
                 if (park)
                 {
                     foreach (var w in toHide) Park(w);
@@ -206,10 +184,14 @@ namespace MultiDesk.Services
         private void Park(WindowModel w)
         {
             if (w == null || w.Hwnd == IntPtr.Zero || !NM.IsWindow(w.Hwnd)) return;
-            if (NM.IsIconic(w.Hwnd)) return;
-            if (NM.IsHungAppWindow(w.Hwnd)) return;
+            if (NM.IsIconic(w.Hwnd)) { DiagPark.Skipped(w, "already-minimized"); return; }
+            if (NM.IsHungAppWindow(w.Hwnd)) { DiagPark.Skipped(w, "window-not-responding"); return; }
             NM.RECT r;
-            if (!NM.GetWindowRect(w.Hwnd, out r)) return;
+            if (!NM.GetWindowRect(w.Hwnd, out r)) { DiagPark.Skipped(w, "rectangle-unreadable"); return; }
+
+            // The reading the return is measured against, taken while the window still stands where
+            // the user left it.
+            var beforePark = Diag.Enabled ? DiagWindow.Capture(w.Hwnd) : new DiagWinState();
 
             if (AtPark(ref r))
             {
@@ -217,6 +199,7 @@ namespace MultiDesk.Services
                 // earlier process parked it and was killed; a centered position at its own size is
                 // captured so it is merely repositioned, never stranded.
                 if (w.ParkedWith < 0) { w.SavedRect = FallbackRect(r); w.ParkedWith = 0; }
+                DiagPark.Skipped(w, "already-at-park-spot");
                 return;
             }
 
@@ -234,10 +217,12 @@ namespace MultiDesk.Services
                         w.SavedRect = r;
                         w.ParkedWith = 0;
                         if (hadFg) NoteParkedForeground(w.Hwnd);
+                        DiagPark.Parked(w, _switchCause, 0, beforePark, DiagWindow.Capture(w.Hwnd));
                         return;
                     }
                     // The call reported success and the window never moved: it clamps position moves
                     // (maximized browsers re-derive position from their monitor). Escalate.
+                    DiagPark.Escalated(w, 0, 1, "position-move-reported-success-and-window-did-not-move");
                     w.ParkEscalation = 1;
                 }
                 else
@@ -246,6 +231,7 @@ namespace MultiDesk.Services
                     // under this or any other mechanism. Logged once; nothing more can be done.
                     if (_parkRefused.Add(w.Hwnd))
                         Log.Info("Park refused for \"" + (w.Title ?? "") + "\"; likely an elevated window this process cannot manage.");
+                    DiagPark.Refused(w, "setwindowpos-returned-false");
                     return;
                 }
             }
@@ -268,12 +254,14 @@ namespace MultiDesk.Services
                         w.SavedPlacement = place;
                         w.ParkedWith = 1;
                         if (hadFg) NoteParkedForeground(w.Hwnd);
+                        DiagPark.Parked(w, _switchCause, 1, beforePark, DiagWindow.Capture(w.Hwnd));
                         return;
                     }
                 }
                 // Defeated the placement route too (fullscreen windows re-derive from the monitor
                 // the same way maximized ones do). Minimizing is what remains, and it keeps the
                 // window listed in Alt+Tab.
+                DiagPark.Escalated(w, 1, 2, "placement-change-did-not-hold");
                 w.ParkEscalation = 2;
                 if (_parkRefused.Add(w.Hwnd))
                     Log.Info("Window \"" + (w.Title ?? "") + "\" defeats every off-screen placement; it is minimized while off its desktop, still listed in Alt+Tab.");
@@ -284,12 +272,13 @@ namespace MultiDesk.Services
             // is what tells the return path whether to come back maximized or normal; Windows itself
             // then rebuilds that geometry from the monitor, exactly.
             var cur = NM.NewPlacement();
-            if (!NM.GetWindowPlacement(w.Hwnd, ref cur)) return;
+            if (!NM.GetWindowPlacement(w.Hwnd, ref cur)) { DiagPark.Skipped(w, "placement-unreadable"); return; }
             w.SavedPlacement = cur;
             w.ParkedWith = 2;
             NM.SetTransitionsDisabled(w.Hwnd, true);
             NM.ShowWindowAsync(w.Hwnd, NM.SW_SHOWMINNOACTIVE);
             if (hadFg) NoteParkedForeground(w.Hwnd);
+            DiagPark.Parked(w, _switchCause, 2, beforePark, DiagWindow.Capture(w.Hwnd));
         }
 
         // Bring a parked window back exactly as it was, by whichever mechanism holds it. Level 0
@@ -303,7 +292,8 @@ namespace MultiDesk.Services
         {
             if (w == null || w.Hwnd == IntPtr.Zero || !NM.IsWindow(w.Hwnd)) return;
             if (w.ParkedWith < 0) return;
-            if (NM.IsHungAppWindow(w.Hwnd)) return; // the heal pass retries once it answers again
+            if (NM.IsHungAppWindow(w.Hwnd)) { DiagPark.Skipped(w, "window-not-responding-on-return"); return; }
+            int level = w.ParkedWith;
             if (w.ParkedWith == 2)
             {
                 // The minimize WAS the park, so the return un-does it, back to the exact state the
@@ -317,12 +307,17 @@ namespace MultiDesk.Services
                 NM.SetWindowPlacement(w.Hwnd, ref place);
                 NM.SetTransitionsDisabled(w.Hwnd, false);
                 w.ParkedWith = -1;
+                DiagPark.Unparked(w, _switchCause, level);
                 return;
             }
             if (NM.IsIconic(w.Hwnd))
             {
                 RepairMinimizedRestoreRect(w);
                 w.ParkedWith = -1;
+                Diag.Write(DiagChannels.Park, "restore-rect-repaired", DiagFormat.Q(w.Title)
+                    + " hwnd=" + DiagFormat.H(w.Hwnd) + " level=" + level
+                    + " | the window stays minimized, only its remembered restore rectangle changed");
+                DiagPark.Forget(w.Hwnd);
                 return;
             }
             if (w.ParkedWith == 0)
@@ -339,6 +334,7 @@ namespace MultiDesk.Services
                 NM.SetWindowPlacement(w.Hwnd, ref place);
             }
             w.ParkedWith = -1;
+            DiagPark.Unparked(w, _switchCause, level);
         }
 
         // A window minimized while parked had the park spot recorded by Windows as its restore
@@ -364,7 +360,13 @@ namespace MultiDesk.Services
         private void EnsureOnScreen(WindowModel w)
         {
             if (w == null || w.Hwnd == IntPtr.Zero || !NM.IsWindow(w.Hwnd)) return;
-            if (ParkingEnabled && !NM.IsWindowVisible(w.Hwnd)) NM.ShowWindowAsync(w.Hwnd, NM.SW_SHOWNA);
+            if (ParkingEnabled && !NM.IsWindowVisible(w.Hwnd))
+            {
+                Diag.Write(DiagChannels.Track, "shown-again", DiagFormat.Q(w.Title)
+                    + " hwnd=" + DiagFormat.H(w.Hwnd) + " desktop=" + w.DesktopIndex
+                    + " | found hidden while its desktop is showing, parked-with=" + w.ParkedWith);
+                NM.ShowWindowAsync(w.Hwnd, NM.SW_SHOWNA);
+            }
             if (NM.IsIconic(w.Hwnd))
             {
                 // Minimized BY the parking (level 2) un-minimizes on return, since the minimize was
@@ -431,7 +433,7 @@ namespace MultiDesk.Services
                 var w = kv.Value;
                 if (w.Hwnd == IntPtr.Zero || !NM.IsWindow(w.Hwnd)) continue;
 
-                if (w.DesktopIndex == ActiveIndex) { EnsureOnScreen(w); continue; }
+                if (w.DesktopIndex == ActiveIndex) { _switchCause = "heal-pass"; EnsureOnScreen(w); continue; }
 
                 bool away = park ? IsParked(w.Hwnd) : !NM.IsWindowVisible(w.Hwnd);
                 if (away) continue;
@@ -443,6 +445,8 @@ namespace MultiDesk.Services
                 if (fgOwner != IntPtr.Zero && w.Hwnd == fgOwner) continue;
                 // On screen although a park was believed to have held: the app reverted it behind our
                 // back, so the mechanism that "held" has in truth been defeated. Escalate one level.
+                DiagPark.HealRepark(w, ActiveIndex);
+                _switchCause = "heal-pass";
                 if (park && w.ParkedWith >= 0 && w.ParkEscalation == w.ParkedWith && w.ParkEscalation < 2)
                     w.ParkEscalation = w.ParkedWith + 1;
                 HideWin(w);

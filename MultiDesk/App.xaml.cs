@@ -26,6 +26,7 @@ namespace MultiDesk
         public static ThemeService Theme { get; private set; }
         public static DesktopManager Desktops { get; private set; }
         public static WindowTracker Tracker { get; private set; }
+        public static UpdateService Updates { get; private set; }
 
         protected override void OnStartup(StartupEventArgs e)
         {
@@ -75,6 +76,15 @@ namespace MultiDesk
             Settings = new SettingsStore();
             Settings.Load();
 
+            // The trace opens before any service that writes to it exists, so nothing a service does
+            // on the way up happens off the record.
+            Diag.Init(Settings.Current.Diagnostics, Settings.Current.DiagnosticsVerbose);
+            DiagSession.Open(Settings.Current);
+            DiagNav.Arm();
+            DiagPark.Arm();
+            DiagOrder.Arm();
+            DiagPane.Arm();
+
             Theme = new ThemeService();
             Theme.Start(Settings);
             Theme.Apply();
@@ -85,12 +95,20 @@ namespace MultiDesk
             Tracker = new WindowTracker(Desktops);
             Tracker.Start();
 
+            // Before the bar, which subscribes to it as it is built.
+            Updates = new UpdateService(Settings);
+            Updates.Start();
+
             CreateTrayIcon();
 
             CreateBar();
 
             // First population once the bar handle exists, so the dock can place it.
             Desktops.RefreshAll();
+
+            // Every watcher has had its chance to arm by now, so a channel still dark is a watcher
+            // that failed to start rather than one with nothing to say yet.
+            DiagChannels.BootCheck();
 
             Log.Info("MultiDesk running.");
         }
@@ -183,8 +201,27 @@ namespace MultiDesk
 
         public static void OpenSupportLink()
         {
-            try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("https://plexpixel.com/donate") { UseShellExecute = true }); }
-            catch (Exception ex) { Log.Error("support link", ex); }
+            OpenLink("https://plexpixel.com/donate", "support link");
+        }
+
+        /// <summary>The project page, opened by the update button on the bar.</summary>
+        public static void OpenProjectLink()
+        {
+            OpenLink(UpdateService.ReleasesPage, "project page");
+        }
+
+        /// <summary>The folder the navigation trace is written to, opened from settings.</summary>
+        public static void OpenDiagnosticFolder()
+        {
+            var folder = Diag.Folder;
+            if (string.IsNullOrEmpty(folder)) return;
+            OpenLink(folder, "diagnostic log folder");
+        }
+
+        private static void OpenLink(string target, string what)
+        {
+            try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(target) { UseShellExecute = true }); }
+            catch (Exception ex) { Log.Error(what, ex); }
         }
 
         private static Drawing.Icon LoadAppIcon()
@@ -211,6 +248,8 @@ namespace MultiDesk
             try { Desktops?.ShowAllWindows(); } catch (Exception ex) { Log.Error("show all on exit", ex); }
             try { _bar?.CloseBar(); } catch (Exception ex) { Log.Error("bar close", ex); }
             try { Theme?.Dispose(); } catch (Exception ex) { Log.Error("theme dispose", ex); }
+            try { Updates?.Dispose(); } catch (Exception ex) { Log.Error("update service dispose", ex); }
+            try { DiagSession.Close(); } catch (Exception ex) { Log.Error("diagnostic session close", ex); }
 
             if (_tray != null)
             {

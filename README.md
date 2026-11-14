@@ -4,24 +4,26 @@
 ![.NET Framework](https://img.shields.io/badge/.NET%20Framework-4.8-512BD4.svg?logo=dotnet&logoColor=white)
 ![C#](https://img.shields.io/badge/C%23-7.3-239120.svg?logo=csharp&logoColor=white)
 ![UI](https://img.shields.io/badge/UI-WPF-1f6feb.svg)
-![Version](https://img.shields.io/badge/Version-2.9.17-success.svg)
+![Version](https://img.shields.io/badge/Version-2.10.0-success.svg)
 ![License](https://img.shields.io/badge/License-MIT-orange.svg)
 
-A lightweight Windows virtual-desktop sidebar and window manager. MultiDesk groups your open windows onto desktops shown as a slim docked bar, so you can switch contexts, preview windows on hover, and move or pin apps between desktops without the friction of Windows' built-in virtual desktops. Everything runs locally as a single tray app, and all settings stay in a plain JSON file on your computer.
+A lightweight Windows virtual-desktop sidebar and window manager for Windows. MultiDesk groups your open windows into desktops shown in a bar that autohides on any side of your screen, letting you switch desktops easily and quickly, peek to preview windows on hover, and move or pin apps between desktops. You can create as many desktops as you want, resize the pane, name the desktops, and even move the desktops around with drag and drop. 
 
 ## Summary
 
 MultiDesk turns one cluttered taskbar into a set of focused desktops shown down the edge of your screen, with:
 
 - **Managed virtual desktops** - Group windows into desktops; switching shows that desktop's windows and hides the rest
-- **📌 Dockable sidebar** - Dock to any screen edge, float it, or auto-hide it to a thin trigger strip
-- **🖼️ Live hover previews** - Hover an icon for a live thumbnail (or a remembered snapshot) with the window title
-- **🖱️ One-click control** - Click an icon to bring a window forward, click again to minimize, right-click for the full menu
-- **🔀 Alt+Tab across desktops** - Reveal every desktop's windows in the system Alt+Tab, or restrict it to the current one
-- **📍 Pin apps to desktops** - Force an app to always open on a chosen desktop, with independent rules per browser profile
-- **⚡ Reliable one-press focus** - Fixes the "press Alt+Tab three times to activate" problem found in other managers
-- **🎨 Native feel** - Dark, light, or system theme that blends into the Windows shell
-- **💾 Local storage** - Settings live in a JSON file you can back up, edit, and restore
+- **Dockable sidebar** - Dock to any screen edge, float it, or auto-hide it to a thin trigger strip
+- **Live hover previews** - Hover an icon for a live thumbnail (or a remembered snapshot) with the window title
+- **One-click control** - Click an icon to bring a window forward, click again to minimize, right-click for the full menu
+- **Alt+Tab across desktops** - Reveal every desktop's windows in the system Alt+Tab, or restrict it to the current one
+- **Pin apps to desktops** - Force an app to always open on a chosen desktop, with independent rules per browser profile
+- **Reliable one-press focus** - Fixes the "press Alt+Tab three times to activate" problem found in other managers
+- **Native feel** - Dark, light, or system theme that blends into the Windows shell
+- **Local storage** - Settings live in a JSON file you can back up, edit, and restore
+- **Navigation trace** - Every switch, Alt+Tab landing, park and pane change is recorded, with anomalies collected in a file of their own
+- **Update check** - The bar shows an update button once a newer release is published
 
 ## Features
 
@@ -104,6 +106,25 @@ Optionally, MultiDesk trims the working set of windows that are hidden on other 
 ### Settings backup and restore
 
 Back up every setting, desktop name, height, and pin to a single JSON file from the Settings window, and restore it on the same or another machine.
+
+### Navigation trace
+
+Navigation faults are intermittent, and an intermittent fault is only on record if recording was already running when it happened. MultiDesk records one under `%APPDATA%\MultiDesk\logs`, kept for 14 days.
+
+The trace carries the decision every foreground change was given, the readings a window was parked with against the readings it came back with, and the slot every icon occupies. Anything measured to have happened with no cause on record goes into `bugs.log`, which holds nothing else.
+
+- An Alt+Tab commit that landed on a different window names the guard that decided it
+- A maximized window that returned filling the screen without the maximized state carries both readings on one line
+- An icon that changed slots with nothing having asked for it is named, with the slot it left and the slot it took
+- The pane resizing on its own, and empty width left beside the last icon column, are measured with the numbers that produced them
+
+Settings has a **Diagnostics** section with the recording toggle, a verbose toggle and a button that opens the folder. Every line format and anomaly name is documented in `docs/notes/MultiDesk/Services/Diag.md`.
+
+### Update check
+
+MultiDesk asks the GitHub releases API for the newest published release at launch and once a day after. A newer one puts an **Update** button on the bar above the coffee row, which opens the releases page. The running version is shown under the Settings window title and the automatic check can be turned off there.
+
+Release tags are read leniently, so `2.10.0`, `v2.10.0` and `MultiDesk-2.10.0-release` all compare the same way. The installer names its own output `MultiDesk-<version>-release.exe` from the version it reads off the built executable.
 
 ## Requirements
 
@@ -257,6 +278,8 @@ If an app minimizes to the tray (for example f.lux) or a transient dialog finish
 
 Try turning off **Follow focus across desktops** in Settings. MultiDesk already guards against focus bouncing during a switch, and on exit it reveals every managed window so none is left hidden.
 
+Open `%APPDATA%\MultiDesk\logs\bugs.log` for what was measured at the time. `alt-tab-commit-not-honored` names the guard that answered the commit, and `focus-on-hidden-desktop` means focus settled on a window whose desktop was not showing.
+
 ### Build errors about C# syntax
 
 The project targets C# 7.3 (`<LangVersion>7.3</LangVersion>`). Make sure you build with the .NET Framework 4.8 toolchain rather than retargeting to a newer framework.
@@ -296,6 +319,9 @@ MultiDesk/
     ├── Models/
     │   └── Models.cs          # Settings and runtime models
     ├── Services/
+    │   ├── Diag/              # Navigation trace: channels, watchers, anomaly detection
+    │   ├── AppVersion.cs      # The running version, read off the assembly
+    │   ├── UpdateService.cs   # Release check against the GitHub API
     │   ├── DesktopManager.cs  # Engine: show/hide, switch, layout
     │   ├── WindowTracker.cs   # Discovers and tracks app windows
     │   ├── WindowActions.cs   # Activate, minimize, close, transparency

@@ -40,6 +40,7 @@ namespace MultiDesk.Services
         private DispatcherTimer _placementSaveTimer;
         private List<PlacementEntry> _pendingPlacements;
         private int _switchGuardUntil; // ignore focus-follow briefly after a switch, to avoid bouncing back
+        private string _switchCause = "startup"; // what asked for the switch whose visibility pass is running
 
         /// <summary>True briefly after a desktop switch, while async show/hide is still settling.</summary>
         public bool InSwitchSettle { get { return Environment.TickCount < _switchGuardUntil; } }
@@ -134,12 +135,20 @@ namespace MultiDesk.Services
             m = new WindowModel { Hwnd = hwnd, Title = title, Pid = pid, ExePath = exe, ProfileArg = profile, DesktopIndex = target };
             try { m.Icon = IconCache.ForWindow(hwnd, exe); } catch (Exception ex) { Log.Error("icon resolve", ex); }
             _byHwnd[hwnd] = m;
+            DiagOrder.Declare("window-discovered");
             var d = DesktopAt(target);
             if (d != null)
             {
                 if (placeOrder >= 0 && placeOrder <= d.Windows.Count) d.Windows.Insert(placeOrder, m);
                 else d.Windows.Add(m);
             }
+            if (Diag.Enabled)
+                Diag.Write(DiagChannels.Track, "discovered", DiagFormat.Q(title)
+                    + " hwnd=" + DiagFormat.H(hwnd)
+                    + " desktop=" + target
+                    + " slot=" + (placeOrder >= 0 ? placeOrder.ToString() : "end")
+                    + " " + DiagWindow.Describe(DiagWindow.Capture(hwnd)));
+            _switchCause = "window-discovered";
             // Onto another desktop, hidden or parked immediately. Onto the active desktop, repaired in
             // case it is a window an earlier MultiDesk process parked and never got to restore before
             // being killed, rather than trusted on sight to already be genuinely on screen.
@@ -182,6 +191,8 @@ namespace MultiDesk.Services
                 { hasSiblingHere = true; break; }
             }
             if (!hasSiblingHere) return false;
+            DiagOrder.Declare("sibling-reunite");
+            _switchCause = "sibling-reunite";
             var from = DesktopAt(w.DesktopIndex);
             var to = DesktopAt(ActiveIndex);
             if (from != null) from.Windows.Remove(w);
@@ -195,6 +206,13 @@ namespace MultiDesk.Services
         {
             WindowModel m;
             if (!_byHwnd.TryGetValue(hwnd, out m)) return;
+            if (Diag.Enabled)
+                Diag.Write(DiagChannels.Track, "removed", DiagFormat.Q(m.Title)
+                    + " hwnd=" + DiagFormat.H(hwnd) + " desktop=" + m.DesktopIndex
+                    + " alive=" + (NM.IsWindow(hwnd) ? "1" : "0") + " state=" + DiagFormat.Flags(hwnd));
+            DiagOrder.Declare("window-removed");
+            DiagPark.Forget(hwnd);
+            DiagNav.Forget(hwnd);
             _byHwnd.Remove(hwnd);
             PreviewCache.Remove(hwnd);
             var d = DesktopAt(m.DesktopIndex);
@@ -212,25 +230,31 @@ namespace MultiDesk.Services
         public IEnumerable<WindowModel> AllWindows { get { return _byHwnd.Values.ToList(); } }
 
         // ---- desktop operations --------------------------------------------
-        public void SwitchTo(int index, bool activateTop = true, bool capturePreviews = true)
+        public void SwitchTo(int index, bool activateTop = true, bool capturePreviews = true, string cause = "unspecified")
         {
             if (index < 0 || index >= Desktops.Count) return;
             try
             {
+                int from = ActiveIndex;
                 _switchGuardUntil = Environment.TickCount + 600; // settle window for focus-follow
                 ActiveIndex = index;
                 for (int i = 0; i < Desktops.Count; i++) Desktops[i].IsActive = (i == index);
+                _switchCause = cause;
                 ApplyVisibility(capturePreviews);
+                IntPtr activated = IntPtr.Zero;
                 if (activateTop)
                 {
                     var d = DesktopAt(index);
                     var top = (d != null && d.Windows.Count > 0) ? d.Windows[d.Windows.Count - 1] : null;
                     if (top != null)
                     {
+                        activated = top.Hwnd;
                         GuardForeground(top.Hwnd);
                         WindowActions.ForceForeground(top.Hwnd);
                     }
                 }
+                var landed = DesktopAt(index);
+                DiagNav.Switched(from, index, cause, landed != null ? landed.Windows.Count : 0, activated);
                 ScheduleTrim();
                 var h = ActiveChanged; if (h != null) h();
             }
@@ -239,6 +263,7 @@ namespace MultiDesk.Services
 
         public void AddDesktop()
         {
+            DiagOrder.Declare("desktop-added");
             int i = Desktops.Count;
             Desktops.Add(new DesktopModel { Index = i, Name = "Desktop " + (i + 1) });
             PersistDesktops();
@@ -248,6 +273,7 @@ namespace MultiDesk.Services
         public void RemoveDesktop(int index)
         {
             if (Desktops.Count <= 1) return;
+            DiagOrder.Declare("desktop-removed-" + index);
             var d = DesktopAt(index);
             if (d == null) return;
             var survivor = DesktopAt(index > 0 ? index - 1 : index + 1);
@@ -265,8 +291,11 @@ namespace MultiDesk.Services
             Reindex();
 
             var newActive = (activeModel != null && Desktops.Contains(activeModel)) ? activeModel : survivor;
+            int wasActive = ActiveIndex;
             ActiveIndex = newActive.Index;
+            DiagNav.ActiveChanged(wasActive, ActiveIndex, "desktop-removed-" + index);
             for (int i = 0; i < Desktops.Count; i++) Desktops[i].IsActive = (i == ActiveIndex);
+            _switchCause = "desktop-removed";
             ApplyVisibility();
             PersistDesktops();
             var h = ActiveChanged; if (h != null) h();
@@ -280,10 +309,13 @@ namespace MultiDesk.Services
             if (toIndex < 0) toIndex = 0;
             if (toIndex >= Desktops.Count) toIndex = Desktops.Count - 1;
             if (fromIndex == toIndex) return;
+            DiagOrder.Declare("desktop-reordered");
             var activeModel = DesktopAt(ActiveIndex);
+            int wasActive = ActiveIndex;
             Desktops.Move(fromIndex, toIndex);
             Reindex();
             ActiveIndex = (activeModel != null) ? activeModel.Index : ActiveIndex;
+            DiagNav.ActiveChanged(wasActive, ActiveIndex, "desktop-reordered");
             for (int i = 0; i < Desktops.Count; i++) Desktops[i].IsActive = (i == ActiveIndex);
             PersistDesktops();
             RaiseLayout();
@@ -304,6 +336,8 @@ namespace MultiDesk.Services
             if (target < 0 || target >= Desktops.Count) return;
             try
             {
+                DiagOrder.Declare("moved-to-desktop-" + target);
+                _switchCause = "moved-to-desktop-" + target;
                 var from = DesktopAt(m.DesktopIndex);
                 var to = DesktopAt(target);
                 if (from != null) from.Windows.Remove(m);
@@ -328,6 +362,8 @@ namespace MultiDesk.Services
             if (dragged == target) return;
             try
             {
+                DiagOrder.Declare("dragged-onto-tile");
+                _switchCause = "dragged-onto-tile";
                 int targetDesktop = target.DesktopIndex;
                 var from = DesktopAt(dragged.DesktopIndex);
                 var to = DesktopAt(targetDesktop);
@@ -347,10 +383,11 @@ namespace MultiDesk.Services
         /// <summary>Safety: reveal every managed window so none is left hidden on a hidden desktop.</summary>
         public void ShowAllWindows()
         {
+            _switchCause = "show-all-windows";
             foreach (var w in _byHwnd.Values) ShowWin(w);
         }
 
-        public void RefreshAll() { ApplyVisibility(); }
+        public void RefreshAll() { _switchCause = "refresh-all"; ApplyVisibility(); }
 
         // ---- app pinning (per profile, persists across reboots) ------------
         public bool IsPinnedTo(WindowModel w, int index)
@@ -457,6 +494,7 @@ namespace MultiDesk.Services
         /// windows that are open and clamping them to a valid desktop.</summary>
         public void ReloadFromSettings()
         {
+            DiagOrder.Declare("settings-reload");
             var s = _settings.Current;
             int want = s.DesktopCount < 1 ? 1 : s.DesktopCount;
             while (Desktops.Count < want)
@@ -477,9 +515,12 @@ namespace MultiDesk.Services
                 Desktops[i].Rows = RowsFor(s.DesktopRows, i);
             }
             Reindex();
+            int wasActive = ActiveIndex;
             if (ActiveIndex >= Desktops.Count) ActiveIndex = Desktops.Count - 1;
             if (ActiveIndex < 0) ActiveIndex = 0;
+            DiagNav.ActiveChanged(wasActive, ActiveIndex, "settings-reload");
             for (int i = 0; i < Desktops.Count; i++) Desktops[i].IsActive = (i == ActiveIndex);
+            _switchCause = "settings-reload";
             ApplyVisibility();
             RaiseLayout();
         }
