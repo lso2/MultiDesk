@@ -5,7 +5,7 @@
 ![C#](https://img.shields.io/badge/C%23-7.3-239120.svg?logo=csharp&logoColor=white)
 ![UI](https://img.shields.io/badge/UI-WPF-1f6feb.svg)
 ![Version](https://img.shields.io/badge/Version-2.11.0-success.svg)
-![License](https://img.shields.io/badge/License-MIT-orange.svg)
+![License](https://img.shields.io/badge/License-GPLv3-blue.svg)
 
 A lightweight virtual-desktop sidebar and window manager for Windows. MultiDesk groups your open windows into desktops shown in a bar that autohides on any side of your screen, letting you switch desktops easily and quickly, peek to preview windows on hover, and move or pin apps between desktops. You can create as many desktops as you want, resize the pane, name the desktops, and even move the desktops around with drag and drop. 
 
@@ -382,7 +382,9 @@ MultiDesk/
 
 ## License
 
-MIT. The license text is in [LICENSE](LICENSE).
+Copyright (C) 2026 PlexPixel
+
+MultiDesk is licensed under the GNU General Public License version 3 (GPL-3.0-only). The full text is in [LICENSE](LICENSE). Sections 15 and 16 of the license disclaim any warranty and limit liability.
 
 ---
 

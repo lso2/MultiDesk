@@ -79,6 +79,8 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]
 Source: "{#MyAppSource}"; DestDir: "{app}"; Flags: ignoreversion
+; The GPLv3 text ships with the program.
+Source: "LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
 
 [Registry]
 ; Start with Windows.
