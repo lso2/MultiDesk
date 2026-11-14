@@ -9,6 +9,8 @@
 
 A lightweight Windows virtual-desktop sidebar and window manager for Windows. MultiDesk groups your open windows into desktops shown in a bar that autohides on any side of your screen, letting you switch desktops easily and quickly, peek to preview windows on hover, and move or pin apps between desktops. You can create as many desktops as you want, resize the pane, name the desktops, and even move the desktops around with drag and drop. 
 
+![Multi-desk sidebar](screens/multidesk-sidebar.jpg) 
+
 ## Summary
 
 MultiDesk turns one cluttered taskbar into a set of focused desktops shown down the edge of your screen, with:
@@ -36,7 +38,9 @@ MultiDesk does not use Windows' native virtual desktops. Instead it manages a se
 - Reorder desktops by dragging a desktop's title, which carries its windows with it
 - The active desktop is marked with a full lighter border, and the active window's icon is highlighted
 
-### The sidebar
+![Multi-desk settings](screens/multidesk-settings.jpg) 
+
+### Sidebar Dock
 
 The bar is a thin, always-available strip of desktop sections.
 
@@ -46,7 +50,7 @@ The bar is a thin, always-available strip of desktop sections.
 - Drag the inner edge to resize the bar's thickness (width when vertical, height when horizontal), snapping to whole icon columns
 - **Reserve space** registers the bar as a Windows AppBar so other windows never cover it, or switch to an overlay that floats above content
 - **Always on top** keeps the bar above other windows
-- The corners are left free in auto-hide mode so moving to the top-right window buttons or the bottom taskbar corner never pops the bar open
+- The corners are left free in auto-hide mode so moving to the top-right window buttons or the bottom taskbar corner never pops the bar open  
 
 ### Window tiles
 
