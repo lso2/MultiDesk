@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using MultiDesk.Models;
 using NM = MultiDesk.Interop.NativeMethods;
 
@@ -227,11 +228,13 @@ namespace MultiDesk.Services
                 }
                 else
                 {
-                    // Windows refused outright: an elevated window no non-elevated process can manage,
-                    // under this or any other mechanism. Logged once; nothing more can be done.
+                    // Windows refused the move outright, as an elevated window does for a non-elevated
+                    // process under this or any other mechanism. Logged once, with the error Windows gave.
+                    int err = Marshal.GetLastWin32Error();
                     if (_parkRefused.Add(w.Hwnd))
-                        Log.Info("Park refused for \"" + (w.Title ?? "") + "\"; likely an elevated window this process cannot manage.");
-                    DiagPark.Refused(w, "setwindowpos-returned-false");
+                        Log.Info("Park refused for \"" + (w.Title ?? "") + "\": SetWindowPos returned false, Win32 error "
+                            + err + ".");
+                    DiagPark.Refused(w, "setwindowpos-returned-false error=" + err);
                     return;
                 }
             }
@@ -410,8 +413,7 @@ namespace MultiDesk.Services
                 if (hadFocus)
                 {
                     SuppressFocusFollow();
-                    var top = TopOfActiveDesktop(w);
-                    if (top != null) WindowActions.ForceForeground(top.Hwnd);
+                    FocusActiveDesktop(ActiveDesktopFocusTarget(IntPtr.Zero, w));
                 }
             }
             else NM.ShowWindowAsync(w.Hwnd, NM.SW_HIDE);

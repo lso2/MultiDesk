@@ -10,7 +10,8 @@ namespace MultiDesk.Services
     /// thickness and compares them against the live ones. Readings arrive on every frame of a drag,
     /// so they are held and evaluated once the bar has stopped moving, which is what keeps one drag
     /// to one line. Code that means to resize the bar declares why first, and a change found with
-    /// nothing declared is reported. Also measures the width the icon grid leaves beyond its last
+    /// nothing declared shortly before the first reading of its burst is reported, with the WPF size
+    /// and display scale of the moment. Also measures the width the icon grid leaves beyond its last
     /// whole column.
     /// Doc: docs/notes/MultiDesk/Services/Diag.md
     /// </summary>
@@ -36,6 +37,10 @@ namespace MultiDesk.Services
         private static int _pendingThickness;
         private static string _pendingEdge;
         private static double _pendingViewport, _pendingCell, _pendingScale;
+        private static double _pendingWpfWidth, _pendingWpfHeight;
+        // When the current burst of readings began. A burst can run past CauseWindowMs before the bar
+        // is still, and a cause is judged by its age when the burst began.
+        private static int _burstStartTick;
 
         public static void Arm() { DiagChannels.Arm(DiagChannels.Pane); }
 
@@ -66,7 +71,7 @@ namespace MultiDesk.Services
         /// in device-independent pixels: width for a bar docked to a side, height for one docked top
         /// or bottom.</summary>
         public static void Sample(IntPtr bar, int thicknessPx, string edge,
-            double viewportDip, double cellDip, double dpiScale)
+            double viewportDip, double cellDip, double dpiScale, double wpfWidthDip, double wpfHeightDip)
         {
             if (!Diag.Enabled) return;
             _pendingBar = bar;
@@ -75,11 +80,14 @@ namespace MultiDesk.Services
             _pendingViewport = viewportDip;
             _pendingCell = cellDip;
             _pendingScale = dpiScale;
+            _pendingWpfWidth = wpfWidthDip;
+            _pendingWpfHeight = wpfHeightDip;
             if (_settle == null)
             {
                 _settle = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(SettleMs) };
                 _settle.Tick += OnSettled;
             }
+            if (!_settle.IsEnabled) _burstStartTick = Environment.TickCount;
             _settle.Stop();
             _settle.Start();
         }
@@ -113,7 +121,7 @@ namespace MultiDesk.Services
                     var change = "was " + Describe(_rect, _thickness, _edge)
                         + " | now " + Describe(r, _pendingThickness, _pendingEdge);
                     _rect = r; _thickness = _pendingThickness; _edge = _pendingEdge;
-                    bool declared = _cause != null && Environment.TickCount - _causeTick < CauseWindowMs;
+                    bool declared = _cause != null && unchecked(_burstStartTick - _causeTick) < CauseWindowMs;
                     if (declared)
                     {
                         Diag.Write(DiagChannels.Pane, "resized", "cause=" + _cause + " | " + change);
@@ -121,11 +129,14 @@ namespace MultiDesk.Services
                     }
                     else
                     {
-                        Diag.Write(DiagChannels.Pane, "resized-unasked", change);
-                        DiagBug.Report("pane-resized-with-no-cause", "pane", change
+                        var wpf = " | wpf=" + _pendingWpfWidth.ToString("0.##", CultureInfo.InvariantCulture)
+                            + "x" + _pendingWpfHeight.ToString("0.##", CultureInfo.InvariantCulture) + "dip"
+                            + " scale=" + _pendingScale.ToString("0.##", CultureInfo.InvariantCulture);
+                        Diag.Write(DiagChannels.Pane, "resized-unasked", change + wpf);
+                        DiagBug.Report("pane-resized-with-no-cause", "pane", change + wpf
                             + " | last-recorded-cause=" + (_cause ?? "none")
-                            + " age=" + (_cause == null ? "n/a"
-                                : (Environment.TickCount - _causeTick).ToString(CultureInfo.InvariantCulture) + "ms"));
+                            + " age-at-burst-start=" + (_cause == null ? "n/a"
+                                : unchecked(_burstStartTick - _causeTick).ToString(CultureInfo.InvariantCulture) + "ms"));
                     }
                 }
                 Slack();

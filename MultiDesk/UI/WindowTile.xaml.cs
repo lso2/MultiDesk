@@ -9,20 +9,26 @@ using MultiDesk.Services;
 namespace MultiDesk.UI
 {
     /// <summary>
-    /// One window in a desktop section. Left click activates it through the hardened routine, right
-    /// click opens the core action menu, hovering shows the live preview, and dragging it onto another
-    /// section moves the window to that desktop.
+    /// One window in a desktop section. Defines WindowTile. Left click activates it through the
+    /// hardened routine, right click opens the core action menu, hovering shows the live preview, and
+    /// dragging it onto another section moves the window to that desktop.
+    /// Doc: docs/notes/MultiDesk/UI/WindowTile.xaml.cs.md
     /// </summary>
     public partial class WindowTile : UserControl
     {
         private Point _press;
         private bool _pressed;
         private bool _dragging;
+        // Set on the second press of a double click, which OnUp ignores. A double click acts as one
+        // click.
+        private bool _secondPress;
         private readonly DispatcherTimer _hoverTimer;
 
         public WindowTile()
         {
             InitializeComponent();
+            // The configured icon size is in place before the first layout pass measures this tile.
+            ApplyIconSize();
             _hoverTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(450) };
             _hoverTimer.Tick += OnHoverTick;
 
@@ -103,6 +109,7 @@ namespace MultiDesk.UI
             _press = e.GetPosition(this);
             _pressed = true;
             _dragging = false;
+            _secondPress = e.ClickCount > 1;
             // Capture so a fast pull keeps routing mouse moves here after the cursor leaves the tile.
             // Without it, a quick grab often produced its first MouseMove when the cursor was already
             // outside, so the drag never started and the release landed on the section behind as a
@@ -146,7 +153,7 @@ namespace MultiDesk.UI
             {
                 // Only a release still over the tile is a click; a release elsewhere is an abandoned
                 // grab and must not fall through to the section as a desktop switch.
-                if (IsMouseOver)
+                if (IsMouseOver && !_secondPress)
                 {
                     var m = Model;
                     if (m != null) WindowActions.Toggle(m);

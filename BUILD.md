@@ -1,59 +1,57 @@
 # MultiDesk Build and Use
 
-MultiDesk is a .NET Framework 4.8 WPF app (x64) that docks a sidebar of virtual desktops and the windows on them. This file covers building it, installing it, and what each part does.
+MultiDesk is a .NET Framework 4.8 WPF app (x64) that docks a sidebar of desktops and their windows to a screen edge. Build steps, installer steps and the parts of the bar follow.
 
 ## Build
 
-Open the solution and produce the executable.
+The solution builds with Visual Studio 2022 or later and the Desktop development with C# workload.
 
-- Open `MultiDesk.sln` in Visual Studio 2022 (the Desktop development with C# workload is enough, because .NET Framework 4.8 ships with it).
+- Open `MultiDesk.sln`.
 - Set the configuration to **Release** and the platform to **x64**.
-- Build, which writes `MultiDesk\bin\x64\Release\MultiDesk.exe`.
+- Build. The executable is written to `MultiDesk\bin\x64\Release\MultiDesk.exe`.
 
-There are no NuGet packages to restore, because the project references only framework assemblies.
+The project references framework assemblies only, and no NuGet restore step exists.
 
 ## Install
 
-Package the build into a single setup executable.
+`Installer.iss` packages the build into a single setup executable.
 
-- Build `MultiDesk.sln` for x64 first so `MultiDesk.exe` exists. Release is packaged when it is present and Debug otherwise.
-- Open `Installer.iss` in Inno Setup and press Compile, which produces `Output\MultiDesk-<version>-release.exe`.
-- The version in the file name, in Add or remove programs, and in the setup executable's own properties is read off the executable that was built. The compiler prints which build and which version it packaged. Neither build being present stops the compile with a message saying so.
+- Build `MultiDesk.sln` for x64 first. Release is packaged when it is present and Debug otherwise.
+- Open `Installer.iss` in Inno Setup and press Compile. The setup is written to `MultiDeskSetup-<version>-release.exe` in the `Output` folder beside `app`.
+- The version in the file name, in Add or remove programs and in the setup executable's properties is read from the built executable. The compiler prints the build and version it packaged, and it stops with a message when neither build exists.
 - The setup installs to the per-user app folder without administrator rights, adds a startup entry, and launches MultiDesk.
 
-You can also just run `MultiDesk.exe` directly without installing.
+`MultiDesk.exe` also runs directly without installing.
 
 ## Use
 
-MultiDesk lives in the tray and shows a bar of desktop sections.
+MultiDesk runs from the tray and shows a bar of desktop sections.
 
-- **Switch desktop:** click a section, or click its title.
-- **Activate a window:** click its icon, which switches to its desktop and focuses it in one action.
-- **Preview a window:** hover its icon to open a live preview beside the bar, with the title as a tooltip.
+- **Switch desktop:** click a section or its title.
+- **Activate a window:** click its icon. The desktop switches and the window gets focus in one action.
+- **Preview a window:** hover its icon for a preview beside the bar with the window title.
 - **Window actions:** right-click an icon for restore, minimize, maximize, move to desktop, always on top, transparency, send to bottom, and close.
-- **Manage desktops:** right-click a section to add, rename, or remove a desktop, and to toggle the titles. Drag a window icon onto another section to move it there.
-- **Dock and snap:** drag the bar by its header near any edge to dock and reserve that strip, or drag it away to float. The header right-click menu and Settings also set the edge, auto-hide, and more.
-- **Cross-desktop switcher:** enable the Ctrl+Alt+D hotkey in Settings to open a list of every window on every desktop and activate one in a single press.
+- **Manage desktops:** right-click a section to add, rename, or remove a desktop, and to toggle the titles. Drag a window icon onto another section to move the window there.
+- **Dock and snap:** drag the bar by its header near any edge to dock it there, or away from the edge to float it. The header right-click menu and Settings also set the edge, auto-hide, and more.
+- **Alt+Tab across desktops:** with **Show every desktop's windows in Windows' own Alt+Tab** on, every desktop's windows are listed in the Windows Alt+Tab, and selecting one switches to its desktop.
+- **Remember window placement:** with **Remember window placement across restarts** on, each window's desktop is restored at the next launch, matched by executable, browser profile and title.
 
-## The single-press activation fix
+## Single-press activation
 
-Every activation runs one synchronous routine that brings the target desktop into view first, restores the window if minimized, then forces focus through the documented foreground-lock workaround, so focus lands on the first action rather than the third.
+An activation switches to the target window's desktop, restores the window when it is minimized, and sets focus with MultiDesk's input queue attached to the foreground and target windows. Focus lands on the first click or Alt+Tab selection.
 
 ## Known limitations
 
-These are deliberate trade-offs of the managed engine in this first build.
-
-- A window hidden on another desktop has no live surface, so its hover preview shows the large icon and title rather than a moving thumbnail.
-- Window-to-desktop assignments reset on restart, because window handles are not stable between sessions. Desktop count, names, and settings persist.
-- A non-elevated MultiDesk cannot show, hide, or trim windows owned by elevated (administrator) processes. Run MultiDesk elevated only if you need that.
+- The hover preview of a window on another desktop shows its remembered snapshot, or its icon when no snapshot exists. The live thumbnail is shown for windows on the current desktop.
+- A non-elevated MultiDesk cannot park, hide, or trim windows owned by elevated (administrator) processes. Running MultiDesk elevated removes that limit.
 - Docking reserves a strip on the primary monitor.
 
 ## Project layout
 
-The code is grouped by role under `MultiDesk\`.
+The code under `MultiDesk\` is grouped by role.
 
-- **Interop** holds the P/Invoke surface and the window-event and DWM-thumbnail wrappers.
-- **Models** holds the settings type and the desktop and window models.
-- **Services** holds the desktop manager, window tracker, window actions, icon cache, dock manager, hotkeys, settings store, theme, and logging.
-- **UI** holds the bar, the desktop section, the window tile, the preview, the switcher, and the settings window.
-- **Themes** holds the dark and light dictionaries and the shared control styles.
+- **Interop:** P/Invoke declarations and the window-event and DWM-thumbnail wrappers.
+- **Models:** the settings type and the desktop and window models.
+- **Services:** the desktop manager, window tracker, window actions, shell route classification, icon cache, dock manager, settings store, theme, update check, logging, and the navigation trace in `Services\Diag`.
+- **UI:** the bar, the desktop section, the window tile, the preview, and the settings window.
+- **Themes:** the dark and light dictionaries and the shared control styles.

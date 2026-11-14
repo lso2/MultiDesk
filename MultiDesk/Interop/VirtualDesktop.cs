@@ -1,24 +1,30 @@
 using System;
 using System.Runtime.InteropServices;
-using MultiDesk.Services;
 
 namespace MultiDesk.Interop
 {
     /// <summary>
-    /// Best-effort pinning of a window to every virtual desktop, so the bar stays visible after a
-    /// desktop switch. This relies on undocumented shell COM whose interface IDs differ between Windows
-    /// builds, so everything is wrapped and any failure is a silent no-op: the bar simply stays on the
-    /// desktop it was created on. This is the same private interface Task View's "show on all desktops"
-    /// uses, and it is the one fragile piece, isolated here on purpose.
+    /// Windows virtual desktop pinning. Defines VirtualDesktop, which pins a window to every Windows
+    /// virtual desktop through the undocumented shell COM behind Task View's "Show this window on all
+    /// desktops". The bar is pinned and stays on screen after a Windows desktop switch. Interface IDs
+    /// of that COM differ between Windows builds, and every call is wrapped.
+    /// Doc: docs/notes/MultiDesk/Interop/VirtualDesktop.cs.md
     /// </summary>
     internal static class VirtualDesktop
     {
-        public static bool PinWindow(IntPtr hwnd)
+        // The service ID the immersive shell answers IVirtualDesktopPinnedApps under. Asking with the
+        // interface ID as the service ID returns E_NOTIMPL.
+        private static readonly Guid PinnedAppsService = new Guid("B5A399E7-1C87-46B8-88E9-FC5747B171BD");
+
+        /// <summary>Pin a window to every Windows virtual desktop. Returns null on success, or the
+        /// error that stopped it. A window the shell has no view for yet reports TYPE_E_ELEMENTNOTFOUND,
+        /// and the caller retries.</summary>
+        public static string PinWindow(IntPtr hwnd)
         {
             try
             {
                 var shellType = Type.GetTypeFromCLSID(new Guid("C2F03A33-21F5-47FA-B4BB-156362A2F239")); // ImmersiveShell
-                if (shellType == null) return false;
+                if (shellType == null) return "ImmersiveShell class not registered";
                 var shell = (IServiceProvider10)Activator.CreateInstance(shellType);
 
                 var viewCollGuid = typeof(IApplicationViewCollection).GUID;
@@ -28,21 +34,20 @@ namespace MultiDesk.Interop
 
                 IApplicationView view;
                 viewColl.GetViewForHwnd(hwnd, out view);
-                if (view == null) return false;
+                if (view == null) return "no application view for the window";
 
+                var pinnedService = PinnedAppsService;
                 var pinnedGuid = typeof(IVirtualDesktopPinnedApps).GUID;
                 object pinnedObj;
-                shell.QueryService(ref pinnedGuid, ref pinnedGuid, out pinnedObj);
+                shell.QueryService(ref pinnedService, ref pinnedGuid, out pinnedObj);
                 var pinned = (IVirtualDesktopPinnedApps)pinnedObj;
 
-                if (pinned.IsViewPinned(view)) return true;
-                pinned.PinView(view);
-                return true;
+                if (!pinned.IsViewPinned(view)) pinned.PinView(view);
+                return null;
             }
             catch (Exception ex)
             {
-                Log.Info("PinWindow (all desktops) not supported on this build: " + ex.Message);
-                return false;
+                return ex.GetType().Name + " 0x" + Marshal.GetHRForException(ex).ToString("X8") + ": " + ex.Message;
             }
         }
 

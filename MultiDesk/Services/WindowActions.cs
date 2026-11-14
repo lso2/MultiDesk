@@ -6,9 +6,11 @@ using NM = MultiDesk.Interop.NativeMethods;
 namespace MultiDesk.Services
 {
     /// <summary>
-    /// Per-window operations. The headline is Activate, which fixes the multi-press focus problem by
-    /// switching to the window's desktop first and then forcing focus through the documented
-    /// foreground-lock workaround, so a single action always lands focus on the target.
+    /// Per-window operations. Defines WindowActions: activate, minimize, close, raise and the rest
+    /// of the actions the bar and the desktop manager run on a window. Activate switches to
+    /// the window's desktop first and then takes the foreground past the system's foreground lock,
+    /// so one click lands focus on the target.
+    /// Doc: docs/notes/MultiDesk/Services/WindowActions.cs.md
     /// </summary>
     internal static class WindowActions
     {
@@ -19,7 +21,7 @@ namespace MultiDesk.Services
             try
             {
                 // Desktop switch first and synchronously, so focus is set after the target is visible.
-                MultiDesk.App.Desktops?.SwitchTo(w.DesktopIndex, false);
+                MultiDesk.App.Desktops?.SwitchTo(w.DesktopIndex, "window-activate", false);
                 ForceForeground(w.Hwnd);
             }
             catch (Exception ex) { Log.Error("activate", ex); }
@@ -40,18 +42,18 @@ namespace MultiDesk.Services
             catch (Exception ex) { Log.Error("toggle", ex); }
         }
 
-        /// <summary>Force a window to the foreground, defeating the foreground lock. This is the core of
-        /// the single-press fix and is reused by the desktop switch and the cross-desktop switcher.</summary>
+        /// <summary>Force a window to the foreground, defeating the foreground lock. Shows or restores
+        /// the window first. Used by Activate, the desktop switch and every focus hand-back.</summary>
         public static void ForceForeground(IntPtr hwnd)
         {
             if (hwnd == IntPtr.Zero || !NM.IsWindow(hwnd)) return;
             try
             {
-                // A hung window cannot run the focus dance below, and attaching this thread's input
-                // queue to a hung thread hangs this thread with it, which reads as the whole bar,
-                // and every desktop switch with it, freezing. One async show and one plain request
-                // are safe; whatever they miss is retried by the next real interaction once the
-                // window answers again.
+                // A hung window cannot run the focus dance in TakeForeground, and attaching this
+                // thread's input queue to a hung thread hangs this thread with it, which reads as the
+                // whole bar, and every desktop switch with it, freezing. One async show and one plain
+                // request are safe; whatever they miss is retried by the next real interaction once
+                // the window answers again.
                 if (NM.IsHungAppWindow(hwnd))
                 {
                     NM.ShowWindowAsync(hwnd, NM.IsIconic(hwnd) ? NM.SW_RESTORE : NM.SW_SHOW);
@@ -62,47 +64,61 @@ namespace MultiDesk.Services
                 if (NM.IsIconic(hwnd)) NM.ShowWindow(hwnd, NM.SW_RESTORE);
                 else NM.ShowWindow(hwnd, NM.SW_SHOW);
 
-                IntPtr fore = NM.GetForegroundWindow();
-                if (fore == hwnd) return;
-
-                uint thisThread = NM.GetCurrentThreadId();
-                uint dummy;
-                uint foreThread = fore != IntPtr.Zero && !NM.IsHungAppWindow(fore)
-                    ? NM.GetWindowThreadProcessId(fore, out dummy) : 0;
-                uint targetThread = NM.GetWindowThreadProcessId(hwnd, out dummy);
-
-                // Drop the foreground lock timeout so the request is honored, restored afterward.
-                uint oldTimeout = 0;
-                bool gotTimeout = NM.SystemParametersInfo(NM.SPI_GETFOREGROUNDLOCKTIMEOUT, 0, ref oldTimeout, 0);
-                uint zero = 0;
-                NM.SystemParametersInfo(NM.SPI_SETFOREGROUNDLOCKTIMEOUT, 0, ref zero, NM.SPIF_SENDCHANGE);
-
-                bool attFore = false, attTarget = false;
-                if (foreThread != 0 && foreThread != thisThread)
-                    attFore = NM.AttachThreadInput(thisThread, foreThread, true);
-                if (targetThread != 0 && targetThread != thisThread && targetThread != foreThread)
-                    attTarget = NM.AttachThreadInput(thisThread, targetThread, true);
-
-                // A synthetic Alt tap marks our thread as having received input, which the lock rules
-                // require before SetForegroundWindow on another thread's window is allowed.
-                NM.keybd_event(NM.VK_MENU, 0, 0, UIntPtr.Zero);
-                NM.keybd_event(NM.VK_MENU, 0, NM.KEYEVENTF_KEYUP, UIntPtr.Zero);
-
-                NM.BringWindowToTop(hwnd);
-                NM.SetForegroundWindow(hwnd);
-                NM.SetActiveWindow(hwnd);
-                NM.SetFocus(hwnd);
-
-                if (attTarget) NM.AttachThreadInput(thisThread, targetThread, false);
-                if (attFore) NM.AttachThreadInput(thisThread, foreThread, false);
-
-                if (gotTimeout)
-                {
-                    uint restore = oldTimeout;
-                    NM.SystemParametersInfo(NM.SPI_SETFOREGROUNDLOCKTIMEOUT, 0, ref restore, NM.SPIF_SENDCHANGE);
-                }
+                if (NM.GetForegroundWindow() == hwnd) return;
+                TakeForeground(hwnd, true);
             }
             catch (Exception ex) { Log.Error("ForceForeground", ex); }
+        }
+
+        /// <summary>Focus the Windows desktop, for an active desktop that shows no window. The desktop
+        /// is activated only, never raised above other windows or shown.</summary>
+        public static void FocusDesktop(IntPtr shell)
+        {
+            if (shell == IntPtr.Zero || !NM.IsWindow(shell)) return;
+            try
+            {
+                if (NM.GetForegroundWindow() == shell) return;
+                // A hung Explorer gets one plain request, for the reason ForceForeground gives.
+                if (NM.IsHungAppWindow(shell)) { NM.SetForegroundWindow(shell); return; }
+                TakeForeground(shell, false);
+            }
+            catch (Exception ex) { Log.Error("FocusDesktop", ex); }
+        }
+
+        // Takes the foreground for hwnd past the foreground lock, with this thread's input queue
+        // attached to the foreground and target threads and a synthetic Alt tap. raise also brings
+        // the window to the top of the z-order and gives it the keyboard focus directly. Windows'
+        // foreground lock timeout is a system-wide setting and is left as the user set it.
+        private static void TakeForeground(IntPtr hwnd, bool raise)
+        {
+            IntPtr fore = NM.GetForegroundWindow();
+            uint thisThread = NM.GetCurrentThreadId();
+            uint dummy;
+            uint foreThread = fore != IntPtr.Zero && !NM.IsHungAppWindow(fore)
+                ? NM.GetWindowThreadProcessId(fore, out dummy) : 0;
+            uint targetThread = NM.GetWindowThreadProcessId(hwnd, out dummy);
+
+            bool attFore = false, attTarget = false;
+            if (foreThread != 0 && foreThread != thisThread)
+                attFore = NM.AttachThreadInput(thisThread, foreThread, true);
+            if (targetThread != 0 && targetThread != thisThread && targetThread != foreThread)
+                attTarget = NM.AttachThreadInput(thisThread, targetThread, true);
+
+            // A synthetic Alt tap marks our thread as having received input, which the lock rules
+            // require before SetForegroundWindow on another thread's window is allowed.
+            NM.keybd_event(NM.VK_MENU, 0, 0, UIntPtr.Zero);
+            NM.keybd_event(NM.VK_MENU, 0, NM.KEYEVENTF_KEYUP, UIntPtr.Zero);
+
+            if (raise) NM.BringWindowToTop(hwnd);
+            NM.SetForegroundWindow(hwnd);
+            if (raise)
+            {
+                NM.SetActiveWindow(hwnd);
+                NM.SetFocus(hwnd);
+            }
+
+            if (attTarget) NM.AttachThreadInput(thisThread, targetThread, false);
+            if (attFore) NM.AttachThreadInput(thisThread, foreThread, false);
         }
 
         // Minimizing or closing the active window hands Windows' own foreground to whatever it judges
@@ -111,6 +127,7 @@ namespace MultiDesk.Services
         public static void Minimize(IntPtr h)
         {
             MultiDesk.App.Desktops?.SuppressFocusFollow();
+            DiagPark.Minimized(h, "bar");
             Safe(h, () => NM.ShowWindow(h, NM.SW_MINIMIZE));
         }
         public static void Maximize(IntPtr h) { Safe(h, () => NM.ShowWindow(h, NM.SW_MAXIMIZE)); }

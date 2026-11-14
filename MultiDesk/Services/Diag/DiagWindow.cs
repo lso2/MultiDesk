@@ -84,13 +84,24 @@ namespace MultiDesk.Services
         public static string Describe(DiagWinState s)
         {
             if (!s.Alive) return "gone";
-            var text = "rect=" + DiagFormat.R(s.Rect) + " cover=" + Coverage(s) + " state=" + DiagFormat.Flags(s.Hwnd);
+            var text = "rect=" + DiagFormat.R(s.Rect) + " cover=" + Coverage(s) + " state=" + StateOf(s);
             if (s.HasPlacement)
                 text += " show=" + DiagFormat.Show(s.ShowCmd) + " normal=" + DiagFormat.R(s.Normal)
                     + ((s.PlacementFlags & NM.WPF_RESTORETOMAXIMIZED) != 0 ? " restore-to-maximized" : "");
             if (s.HasMonitor)
                 text += " mon=" + DiagFormat.H(s.Monitor) + " work=" + DiagFormat.R(s.Work);
             return text;
+        }
+
+        // The state flags as the reading captured them, in the order DiagFormat.Flags writes live ones.
+        private static string StateOf(DiagWinState s)
+        {
+            var text = "";
+            if (s.Visible) text += "visible ";
+            if (s.Iconic) text += "minimized ";
+            if (s.Zoomed) text += "maximized ";
+            if (s.Cloaked) text += "cloaked ";
+            return text.Length > 0 ? text.TrimEnd() : "plain";
         }
 
         /// <summary>Everything that changed between two readings of one window, named. An empty

@@ -8,9 +8,11 @@ using NM = MultiDesk.Interop.NativeMethods;
 namespace MultiDesk.Services
 {
     /// <summary>
-    /// Discovers top-level application windows and keeps the desktop manager in sync. Window event
-    /// hooks signal changes, which are debounced into a single reconcile pass so a busy moment with
-    /// many windows costs one refresh. The foreground event updates the active-window highlight at once.
+    /// Window discovery. Defines WindowTracker, which finds top-level application windows and keeps
+    /// the desktop manager in sync. Window event hooks signal changes, which are debounced into a
+    /// single reconcile pass so a busy moment with many windows costs one refresh. The foreground
+    /// event updates the active-window highlight immediately.
+    /// Doc: docs/notes/MultiDesk/Services/WindowTracker.cs.md
     /// </summary>
     public sealed class WindowTracker : IDisposable
     {
@@ -101,7 +103,11 @@ namespace MultiDesk.Services
         // is what keeps minimizing from ever switching desktops.
         private void OnMinimize(uint evt, IntPtr hwnd, int idObject, int idChild)
         {
-            if (evt == NM.EVENT_SYSTEM_MINIMIZESTART) _desktops.NoteWindowLeaving(hwnd);
+            if (evt == NM.EVENT_SYSTEM_MINIMIZESTART)
+            {
+                _desktops.NoteWindowLeaving(hwnd);
+                DiagPark.Minimized(hwnd, "window-event");
+            }
             ScheduleRefresh();
         }
 

@@ -5,21 +5,13 @@ using NM = MultiDesk.Interop.NativeMethods;
 namespace MultiDesk.Services
 {
     /// <summary>
-    /// Foreground bookkeeping that keeps focus-follow honest. There is no custom Alt+Tab gesture to
-    /// manage here: cross-desktop switching goes through the real, unmodified Windows Alt+Tab
-    /// directly, which the parking engine in DesktopManager.Visibility.cs makes possible by keeping
-    /// off-desktop windows genuinely WS_VISIBLE, just relocated off screen, instead of hidden, so the
-    /// OS's own switcher already enumerates and thumbnails every desktop's windows on its own with
-    /// nothing drawn by MultiDesk. What is left to do here is smaller: when the OS reports a new
-    /// foreground window, decide which of three things it is. The user landing on a window through a
-    /// normal route (a click, a real Alt+Tab commit) syncs MultiDesk's own ActiveIndex and sidebar
-    /// highlight, switching desktops if the window lives on another one. Windows picking a successor
-    /// on its own right after something was minimized, closed, or parked follows nobody anywhere,
-    /// and if the successor it picked is a parked window (parked windows stay WS_VISIBLE, so they
-    /// are eligible in a way hidden windows never were), the foreground is handed straight back to
-    /// the active desktop so keystrokes never land on a window no monitor shows. Anything else
-    /// holding foreground while still off screen is corrected immediately regardless of any
-    /// setting, because nothing may hold foreground while off screen.
+    /// Foreground decisions. Part of DesktopManager: a new foreground window on another desktop is
+    /// followed with a desktop switch, handed back to the active desktop, or left alone. A person
+    /// picking the window through Alt+Tab, the taskbar, the tray overflow or Start always switches.
+    /// A window grabbing focus on its own switches only while Follow focus across desktops is on.
+    /// Focus never stays on a window off screen: it goes to the active desktop's top window, or to
+    /// the Windows desktop when the active desktop shows none.
+    /// Doc: docs/notes/MultiDesk/Services/DesktopManager.Foreground.cs.md
     /// </summary>
     public sealed partial class DesktopManager
     {
@@ -73,31 +65,6 @@ namespace MultiDesk.Services
         // standing somewhere real.
         private IntPtr _prevFg;
 
-        // The system task-switcher windows foreground passes through during a real Alt+Tab. A
-        // committed Alt+Tab leaves one of these as the "previous" foreground, and it hides itself the
-        // instant it closes, which must never be mistaken for the previous window vanishing.
-        private static bool IsTaskChooser(IntPtr hwnd)
-        {
-            if (hwnd == IntPtr.Zero) return false;
-            var c = NM.ClassOf(hwnd);
-            return c == "XamlExplorerHostIslandWindow" || c == "ForegroundStaging"
-                || c == "MultitaskingViewFrame" || c == "TaskSwitcherWnd"
-                || c == "TaskListThumbnailWnd" || c == "Windows.UI.Core.CoreWindow";
-        }
-
-        // The classes that are only ever the switcher itself. IsTaskChooser above is deliberately
-        // wider, since it decides an exemption where a false positive is harmless. This one decides
-        // whether the trace calls a foreground change a hand-picked Alt+Tab, where a false positive
-        // would put ordinary focus changes on record as faults, so it leaves out ForegroundStaging
-        // and Windows.UI.Core.CoreWindow, both of which ordinary windows also use.
-        private static bool IsAltTabCommit(IntPtr hwnd)
-        {
-            if (hwnd == IntPtr.Zero) return false;
-            var c = NM.ClassOf(hwnd);
-            return c == "XamlExplorerHostIslandWindow" || c == "MultitaskingViewFrame"
-                || c == "TaskSwitcherWnd" || c == "TaskListThumbnailWnd";
-        }
-
         /// <summary>Update the active-window highlight and, optionally, follow focus across desktops.</summary>
         public void SetForeground(IntPtr hwnd)
         {
@@ -113,11 +80,12 @@ namespace MultiDesk.Services
                 if (on) active = w;
             }
 
-            // The system task switcher held the foreground right up to this event, which makes this a
-            // window the user picked by hand in Alt+Tab. The trace carries that fact, so a landing
-            // somewhere else can be told apart from a hand-off Windows performed on its own. Read
-            // only while tracing is on: nothing outside the trace uses it.
-            bool viaChooser = Diag.Enabled && IsAltTabCommit(prevFg);
+            // The shell route whose window held the foreground right up to this event, if any. With
+            // recent input, a window reaching the foreground out of Alt+Tab, the taskbar, the tray
+            // overflow or Start is a window a person picked there (ShellRoutes.IsPick). The trace
+            // marks the Alt+Tab case, and the landing check reports focus MultiDesk sent away from it.
+            string route = ShellRoutes.RouteOf(prevFg);
+            bool viaChooser = route == ShellRoutes.AltTab;
 
             // One-shot revert: an unrequested grab by a different tracked window right after focus was
             // placed deliberately gets pushed back once, which stops a media window from planting
@@ -187,11 +155,10 @@ namespace MultiDesk.Services
                 // followed.
                 if (Environment.TickCount - _parkedFgAt < 250)
                 {
-                    var steer = TopOfActiveDesktop(null);
+                    var steer = ActiveDesktopFocusTarget(prevFg);
                     DiagNav.Foreground(hwnd, active.Title, active.DesktopIndex, ActiveIndex,
-                        DiagNav.OutHandoffPark, viaChooser,
-                        steer != null ? steer.Hwnd : IntPtr.Zero, state);
-                    if (steer != null) WindowActions.ForceForeground(steer.Hwnd);
+                        DiagNav.OutHandoffPark, viaChooser, steer, state);
+                    FocusActiveDesktop(steer);
                     return;
                 }
 
@@ -199,18 +166,17 @@ namespace MultiDesk.Services
                 // window has vanished (closed, hid itself, or minimized), this foreground change is
                 // Windows replacing a dead spot, never the user picking a destination, so it must not
                 // switch desktops no matter when its event arrives; closing or minimizing the last
-                // window of a desktop stays on that desktop. A committed Alt+Tab leaves the system
-                // task switcher as the previous window, and it hides itself on close, which is why
-                // the chooser is recognized and exempted rather than read as a vanish.
+                // window of a desktop stays on that desktop. A pick through Alt+Tab, a taskbar
+                // thumbnail, the tray overflow or Start leaves that shell window as the previous
+                // window, hidden by its own close. A shell route is exempt.
                 bool prevVanished = prevFg != IntPtr.Zero && prevFg != hwnd
                     && (!NM.IsWindow(prevFg) || !NM.IsWindowVisible(prevFg) || NM.IsIconic(prevFg));
-                if (prevVanished && !IsTaskChooser(prevFg))
+                if (prevVanished && route == null)
                 {
-                    var steer = TopOfActiveDesktop(null);
+                    var steer = ActiveDesktopFocusTarget(prevFg);
                     DiagNav.Foreground(hwnd, active.Title, active.DesktopIndex, ActiveIndex,
-                        DiagNav.OutHandoffVanished, viaChooser,
-                        steer != null ? steer.Hwnd : IntPtr.Zero, state);
-                    if (steer != null) WindowActions.ForceForeground(steer.Hwnd);
+                        DiagNav.OutHandoffVanished, viaChooser, steer, state);
+                    FocusActiveDesktop(steer);
                     return;
                 }
 
@@ -220,11 +186,11 @@ namespace MultiDesk.Services
                 // starves any loop instead of feeding it.
                 if (Environment.TickCount < _stuckCooldownUntil)
                 {
-                    var t = TopOfActiveDesktop(null);
+                    var t = ActiveDesktopFocusTarget(prevFg);
                     DiagNav.Foreground(hwnd, active.Title, active.DesktopIndex, ActiveIndex,
-                        DiagNav.OutBreakerCooldown, viaChooser, t != null ? t.Hwnd : IntPtr.Zero,
+                        DiagNav.OutBreakerCooldown, viaChooser, t,
                         state + " cooldown-remaining=" + (_stuckCooldownUntil - Environment.TickCount) + "ms");
-                    if (t != null) WindowActions.ForceForeground(t.Hwnd);
+                    FocusActiveDesktop(t);
                     return;
                 }
             }
@@ -242,11 +208,10 @@ namespace MultiDesk.Services
                 string left = " suppress-remaining=" + (_suppressFocusFollowUntil - Environment.TickCount) + "ms";
                 if (stuckOffScreen)
                 {
-                    var top = TopOfActiveDesktop(null);
+                    var top = ActiveDesktopFocusTarget(prevFg);
                     DiagNav.Foreground(hwnd, active.Title, active.DesktopIndex, ActiveIndex,
-                        DiagNav.OutSuppressedSteer, viaChooser, top != null ? top.Hwnd : IntPtr.Zero,
-                        state + left);
-                    if (top != null) WindowActions.ForceForeground(top.Hwnd);
+                        DiagNav.OutSuppressedSteer, viaChooser, top, state + left);
+                    FocusActiveDesktop(top);
                     return;
                 }
                 DiagNav.Foreground(hwnd, active.Title, active.DesktopIndex, ActiveIndex,
@@ -254,14 +219,25 @@ namespace MultiDesk.Services
                 return;
             }
 
-            // A window on another desktop taking foreground while genuinely on screen went through
-            // some legitimate on-screen route, so the focus-follow setting decides whether to follow.
-            // Taking foreground while still off screen (a real Alt+Tab commit on a parked window, a
-            // notification activating itself, a relaunch of a single-instance app) is corrected
-            // regardless of that setting, because a window cannot usefully stay both foreground and
-            // off screen.
-            if (!stuckOffScreen && !_settings.Current.AutoSwitchOnForeground)
+            // A person picking a window on another desktop through Alt+Tab, the taskbar, the tray
+            // overflow or Start always switches to it. Anything else is the window grabbing focus on
+            // its own, and Follow focus across desktops decides whether the desktop follows it, for
+            // parked and on-screen windows alike. Under parking, a grab that is not followed hands
+            // focus back to the active desktop, and a grabbing window standing on screen goes back to
+            // its own desktop.
+            bool userPicked = ShellRoutes.IsPick(route);
+            if (!userPicked && !_settings.Current.AutoSwitchOnForeground)
             {
+                if (stuckOffScreen || ParkingEnabled)
+                {
+                    var back = ActiveDesktopFocusTarget(prevFg);
+                    DiagNav.Foreground(hwnd, active.Title, active.DesktopIndex, ActiveIndex,
+                        DiagNav.OutGrabSteeredBack, viaChooser, back, state);
+                    // Parking a focused window hands focus back as part of the park.
+                    if (stuckOffScreen) FocusActiveDesktop(back);
+                    else HideWin(active);
+                    return;
+                }
                 DiagNav.Foreground(hwnd, active.Title, active.DesktopIndex, ActiveIndex,
                     DiagNav.OutNoFollowSetting, viaChooser, IntPtr.Zero, state);
                 return;
@@ -301,18 +277,18 @@ namespace MultiDesk.Services
                 {
                     _stuckCooldownUntil = now + 1200;
                     Log.Info("Stuck-switch circuit breaker tripped; stuck foreground events ignored for 1.2s.");
-                    var t = TopOfActiveDesktop(null);
+                    var t = ActiveDesktopFocusTarget(prevFg);
                     DiagNav.Foreground(hwnd, active.Title, active.DesktopIndex, ActiveIndex,
-                        DiagNav.OutBreakerTrip, viaChooser, t != null ? t.Hwnd : IntPtr.Zero,
+                        DiagNav.OutBreakerTrip, viaChooser, t,
                         state + " four-switches-within=" + (now - _stuckSwitch3) + "ms");
-                    if (t != null) WindowActions.ForceForeground(t.Hwnd);
+                    FocusActiveDesktop(t);
                     return;
                 }
                 _stuckSwitch3 = _stuckSwitch2; _stuckSwitch2 = _stuckSwitch1; _stuckSwitch1 = now;
             }
             DiagNav.Foreground(hwnd, active.Title, active.DesktopIndex, ActiveIndex,
                 DiagNav.OutSwitched, viaChooser, IntPtr.Zero, state);
-            SwitchTo(active.DesktopIndex, false, true, viaChooser ? "alt-tab-commit" : "focus-follow");
+            SwitchTo(active.DesktopIndex, userPicked ? route + "-pick" : "focus-follow", false);
             WindowActions.ForceForeground(hwnd);
         }
 
@@ -324,28 +300,54 @@ namespace MultiDesk.Services
             _fgGuardUsed = false;
         }
 
-        // The topmost tracked window of the active desktop that is actually standing on screen,
-        // skipping the given one, or null when the active desktop has nothing restorable to focus.
-        // Used wherever the foreground must be steered back onto the active desktop after Windows or
-        // a park operation put it somewhere off screen. Minimized windows are skipped deliberately:
-        // ForceForeground restores a minimized window as its first step, so steering focus to one
-        // here would un-minimize it, and the most common way this code runs is milliseconds after
-        // the user minimized exactly that window, whose minimize must stick. When nothing qualifies,
-        // the caller leaves the foreground alone, which suppression already keeps from switching
-        // desktops.
-        private WindowModel TopOfActiveDesktop(WindowModel except)
+        // The highest window in the z-order that belongs to the active desktop and stands on screen,
+        // skipping the given one, or null when the active desktop shows none. Windows hands the
+        // foreground down the z-order, and this is the same successor with other desktops' windows
+        // left out. ForceForeground restores a minimized window as its first step, and minimized
+        // windows are skipped: this runs most often milliseconds after the user minimized a window,
+        // and that minimize must stick. A hide mode switch shows windows asynchronously, and passes
+        // requireOnScreen false.
+        private WindowModel TopOfActiveDesktop(WindowModel except, bool requireOnScreen = true)
         {
-            var d = DesktopAt(ActiveIndex);
-            if (d == null) return null;
-            for (int i = d.Windows.Count - 1; i >= 0; i--)
+            for (IntPtr h = NM.GetTopWindow(IntPtr.Zero); h != IntPtr.Zero; h = NM.GetWindow(h, NM.GW_HWNDNEXT))
             {
-                var c = d.Windows[i];
-                if (c == except) continue;
-                if (c.Hwnd == IntPtr.Zero || !NM.IsWindow(c.Hwnd)) continue;
-                if (NM.IsIconic(c.Hwnd)) continue;
+                WindowModel c;
+                if (!_byHwnd.TryGetValue(h, out c) || c == except || c.DesktopIndex != ActiveIndex) continue;
+                if (NM.IsIconic(h) || (requireOnScreen && !OnScreen(h))) continue;
                 return c;
             }
             return null;
+        }
+
+        // Where focus goes when a foreground change is not followed, or when the focused window is
+        // parked: the window that held the foreground before, while it stands on screen on the active
+        // desktop, else the active desktop's top window, else the Windows desktop. Input then never
+        // stays on a window no monitor shows.
+        private IntPtr ActiveDesktopFocusTarget(IntPtr previous, WindowModel except = null)
+        {
+            if (IsActiveDesktopWindow(previous) && (except == null || except.Hwnd != previous)) return previous;
+            var top = TopOfActiveDesktop(except);
+            return top != null ? top.Hwnd : NM.GetShellWindow();
+        }
+
+        // A window standing on screen on the active desktop: a tracked one, or an untracked one owned
+        // by a tracked one, such as a dialog.
+        private bool IsActiveDesktopWindow(IntPtr h)
+        {
+            if (h == IntPtr.Zero || NM.IsIconic(h) || !OnScreen(h)) return false;
+            WindowModel m;
+            if (_byHwnd.TryGetValue(h, out m)) return m.DesktopIndex == ActiveIndex;
+            IntPtr owner = NM.GetWindow(h, NM.GW_OWNER);
+            return owner != IntPtr.Zero && _byHwnd.TryGetValue(owner, out m) && m.DesktopIndex == ActiveIndex;
+        }
+
+        // Focus for a target ActiveDesktopFocusTarget returned. The Windows desktop is focused only,
+        // never raised or restored.
+        private static void FocusActiveDesktop(IntPtr target)
+        {
+            if (target == IntPtr.Zero) return;
+            if (target == NM.GetShellWindow()) WindowActions.FocusDesktop(target);
+            else WindowActions.ForceForeground(target);
         }
     }
 }

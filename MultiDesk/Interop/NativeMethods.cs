@@ -5,8 +5,11 @@ using System.Text;
 namespace MultiDesk.Interop
 {
     /// <summary>
-    /// Win32 P/Invoke surface for MultiDesk. Everything is cross-process but read, move, show, or
-    /// focus only. No code is injected into other processes. Grouped by purpose for readability.
+    /// Win32 declarations. Defines NativeMethods, the P/Invoke declarations MultiDesk calls user32,
+    /// kernel32, gdi32, psapi, dwmapi and shell32 through, grouped by purpose. Calls on other
+    /// processes' windows read, move, show or focus them, and no code is injected into another
+    /// process.
+    /// Doc: docs/notes/MultiDesk/Interop/NativeMethods.cs.md
     /// </summary>
     internal static class NativeMethods
     {
@@ -73,6 +76,10 @@ namespace MultiDesk.Interop
         [DllImport("user32.dll")]
         public static extern IntPtr GetShellWindow();
 
+        // The top-level window at the top of the z-order. GetWindow with GW_HWNDNEXT walks down from it.
+        [DllImport("user32.dll")]
+        public static extern IntPtr GetTopWindow(IntPtr hWnd);
+
         public const uint GW_OWNER = 4;
         public const uint GW_HWNDNEXT = 2;
         public const uint GA_ROOT = 2;
@@ -121,6 +128,22 @@ namespace MultiDesk.Interop
 
         public const byte VK_MENU = 0x12;
         public const uint KEYEVENTF_KEYUP = 0x0002;
+
+        // True when a window's thread has stopped pumping messages. Attaching input to a hung thread
+        // hangs the caller, and focus calls skip the input-queue attach for such a window.
+        [DllImport("user32.dll")]
+        public static extern bool IsHungAppWindow(IntPtr hwnd);
+
+        // Time of the last keyboard or mouse input in the session, in GetTickCount milliseconds.
+        [StructLayout(LayoutKind.Sequential)]
+        public struct LASTINPUTINFO
+        {
+            public uint cbSize;
+            public uint dwTime;
+        }
+
+        [DllImport("user32.dll")]
+        public static extern bool GetLastInputInfo(ref LASTINPUTINFO plii);
 
         // ---- show state / positioning --------------------------------------
         [DllImport("user32.dll")]
@@ -326,18 +349,8 @@ namespace MultiDesk.Interop
         [DllImport("user32.dll")]
         public static extern int GetSystemMetrics(int nIndex);
 
-        [DllImport("user32.dll", SetLastError = true)]
-        public static extern bool SystemParametersInfo(uint uiAction, uint uiParam, ref RECT pvParam, uint fWinIni);
-
-        [DllImport("user32.dll", SetLastError = true)]
-        public static extern bool SystemParametersInfo(uint uiAction, uint uiParam, ref uint pvParam, uint fWinIni);
-
         public const int SM_CXSCREEN = 0;
         public const int SM_CYSCREEN = 1;
-        public const uint SPI_GETWORKAREA = 0x0030;
-        public const uint SPI_GETFOREGROUNDLOCKTIMEOUT = 0x2000;
-        public const uint SPI_SETFOREGROUNDLOCKTIMEOUT = 0x2001;
-        public const uint SPIF_SENDCHANGE = 0x0002;
 
         public const uint ABM_NEW = 0x0;
         public const uint ABM_REMOVE = 0x1;
@@ -352,57 +365,9 @@ namespace MultiDesk.Interop
 
         public const int ABN_POSCHANGED = 0x1;
 
-        // ---- hotkeys --------------------------------------------------------
-        [DllImport("user32.dll")]
-        public static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
-
-        [DllImport("user32.dll")]
-        public static extern bool UnregisterHotKey(IntPtr hWnd, int id);
-
-        public const uint MOD_ALT = 0x1;
-        public const uint MOD_CONTROL = 0x2;
-        public const uint MOD_SHIFT = 0x4;
-        public const uint MOD_WIN = 0x8;
-        public const uint MOD_NOREPEAT = 0x4000;
-        public const int WM_HOTKEY = 0x0312;
-
-        // ---- low-level keyboard hook (optional Alt+Tab across desktops) -----
-        // Swallows Tab and Escape only while a physically-held Alt confirms a real Alt+Tab gesture is
-        // in progress with all-desktops mode on, so it can never eat those keys anywhere else.
-        public delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
-
-        [DllImport("user32.dll", SetLastError = true)]
-        public static extern IntPtr SetWindowsHookEx(int idHook, LowLevelKeyboardProc lpfn, IntPtr hMod, uint dwThreadId);
-
-        [DllImport("user32.dll", SetLastError = true)]
-        public static extern bool UnhookWindowsHookEx(IntPtr hhk);
-
-        [DllImport("user32.dll")]
-        public static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
-
-        [DllImport("kernel32.dll", CharSet = CharSet.Auto)]
-        public static extern IntPtr GetModuleHandle(string lpModuleName);
-
-        // Reads the physical key state, so the hook can verify Alt is really held and can recover
-        // from an Alt-up it never saw (secure desktop, UAC prompt, Win+L).
-        [DllImport("user32.dll")]
-        public static extern short GetAsyncKeyState(int vKey);
-
-        // True when a window's thread has stopped pumping messages. Used to skip such windows during
-        // the synchronous Alt+Tab reveal, where one hung app would stall the keyboard hook.
-        [DllImport("user32.dll")]
-        public static extern bool IsHungAppWindow(IntPtr hwnd);
-
-        public const int WH_KEYBOARD_LL = 13;
-        public const int WM_KEYDOWN = 0x0100;
-        public const int WM_KEYUP = 0x0101;
-        public const int WM_SYSKEYDOWN = 0x0104;
-        public const int WM_SYSKEYUP = 0x0105;
-        public const int VK_TAB = 0x09;
-        public const int VK_ESCAPE = 0x1B;
-        public const int VK_SHIFT = 0x10;
-        public const int VK_LMENU = 0xA4;
-        public const int VK_RMENU = 0xA5;
+        // Display scale and resolution changes, after which a docked bar is put back on its edge.
+        public const int WM_DPICHANGED = 0x02E0;
+        public const int WM_DISPLAYCHANGE = 0x007E;
 
         // ---- icon extraction (exe fallback) --------------------------------
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]

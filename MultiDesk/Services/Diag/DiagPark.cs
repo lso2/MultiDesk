@@ -10,7 +10,8 @@ namespace MultiDesk.Services
     /// Park and restore tracing. Defines DiagPark, which records the reading taken when a window
     /// leaves its desktop and checks the window against that same reading once it has come back and
     /// settled. A window restored to the size of the screen without the maximized state it was left
-    /// in is reported here, with both readings on the line.
+    /// in is reported here, with both readings on the line. A window parked or minimized again
+    /// before the check runs has no settled return to check.
     /// Doc: docs/notes/MultiDesk/Services/Diag.md
     /// </summary>
     internal static class DiagPark
@@ -26,6 +27,7 @@ namespace MultiDesk.Services
             public int Level;
             public int DueTick;
             public DiagWinState Parked;
+            public string MinimizedBy;
         }
 
         // The repair pass runs twice a second and a window it cannot move stays wrong forever, so
@@ -36,6 +38,10 @@ namespace MultiDesk.Services
         private static readonly Dictionary<IntPtr, int> LastSaid = new Dictionary<IntPtr, int>();
         private static readonly List<Pending> Waiting = new List<Pending>();
         private static DispatcherTimer _settle;
+
+        // Windows whose park Windows refused. Such a window stays where it is for the whole session.
+        // Its refusal is written once, and the repair pass does not report it.
+        private static readonly HashSet<IntPtr> RefusedWindows = new HashSet<IntPtr>();
 
         public static void Arm()
         {
@@ -51,6 +57,7 @@ namespace MultiDesk.Services
             try
             {
                 lock (AtPark) { AtPark[w.Hwnd] = before; }
+                lock (Waiting) { Waiting.RemoveAll(p => p.Hwnd == w.Hwnd); }
                 Diag.Write(DiagChannels.Park, "parked", DiagFormat.Q(w.Title)
                     + " hwnd=" + DiagFormat.H(w.Hwnd)
                     + " desktop=" + w.DesktopIndex.ToString(CultureInfo.InvariantCulture)
@@ -79,7 +86,7 @@ namespace MultiDesk.Services
         public static void Refused(WindowModel w, string reason)
         {
             if (!Diag.Enabled || w == null) return;
-            if (!Due("refused", w.Hwnd)) return;
+            lock (RefusedWindows) { if (!RefusedWindows.Add(w.Hwnd)) return; }
             Diag.Write(DiagChannels.Park, "refused", DiagFormat.Q(w.Title)
                 + " hwnd=" + DiagFormat.H(w.Hwnd) + " reason=" + reason);
             DiagBug.Report("park-refused", DiagFormat.Q(w.Title), "reason=" + reason
@@ -87,11 +94,12 @@ namespace MultiDesk.Services
         }
 
         /// <summary>The repair pass found a window standing on screen that belongs to another
-        /// desktop. A window this process cannot move stays in that state permanently, so the
-        /// readings are taken and written at most once per window per repeat window.</summary>
+        /// desktop. The readings are written at most once per window per repeat window, and never
+        /// for a window whose park was refused, which the refusal line already accounts for.</summary>
         public static void HealRepark(WindowModel w, int activeIndex)
         {
             if (!Diag.Enabled || w == null) return;
+            lock (RefusedWindows) { if (RefusedWindows.Contains(w.Hwnd)) return; }
             if (!Due("heal", w.Hwnd)) return;
             var reading = DiagWindow.Describe(DiagWindow.Capture(w.Hwnd));
             var detail = "desktop=" + w.DesktopIndex.ToString(CultureInfo.InvariantCulture)
@@ -163,6 +171,22 @@ namespace MultiDesk.Services
             catch { }
         }
 
+        /// <summary>A window was minimized, by the bar or by a minimize Windows reported. A window
+        /// minimized while its restore check is pending has no settled return to check.</summary>
+        public static void Minimized(IntPtr hwnd, string by)
+        {
+            if (!Diag.Enabled) return;
+            try
+            {
+                lock (Waiting)
+                {
+                    foreach (var p in Waiting)
+                        if (p.Hwnd == hwnd && p.MinimizedBy == null) p.MinimizedBy = by;
+                }
+            }
+            catch { }
+        }
+
         /// <summary>Forget a window that is gone, so its park reading cannot outlive it.</summary>
         public static void Forget(IntPtr hwnd)
         {
@@ -170,11 +194,11 @@ namespace MultiDesk.Services
             {
                 lock (AtPark) { AtPark.Remove(hwnd); }
                 lock (Waiting) { Waiting.RemoveAll(p => p.Hwnd == hwnd); }
+                lock (RefusedWindows) { RefusedWindows.Remove(hwnd); }
                 lock (LastSaid)
                 {
                     foreach (var k in new List<IntPtr>(LastSaid.Keys))
-                        if ((k.ToInt64() ^ "heal".GetHashCode()) == hwnd.ToInt64()
-                            || (k.ToInt64() ^ "refused".GetHashCode()) == hwnd.ToInt64()) LastSaid.Remove(k);
+                        if ((k.ToInt64() ^ "heal".GetHashCode()) == hwnd.ToInt64()) LastSaid.Remove(k);
                 }
             }
             catch { }
@@ -214,10 +238,16 @@ namespace MultiDesk.Services
             {
                 var now = DiagWindow.Capture(p.Hwnd);
                 if (!now.Alive) return;
-                var fault = DiagWindow.RestoreFault(p.Parked, now);
                 var line = "level=" + p.Level.ToString(CultureInfo.InvariantCulture)
                     + " | left " + DiagWindow.Describe(p.Parked)
                     + " | back " + DiagWindow.Describe(now);
+                if (p.MinimizedBy != null)
+                {
+                    Diag.Detail(DiagChannels.Geom, "minimized-after-restore", DiagFormat.Q(p.Title)
+                        + " by=" + p.MinimizedBy + " " + line);
+                    return;
+                }
+                var fault = DiagWindow.RestoreFault(p.Parked, now);
                 if (fault == null)
                 {
                     Diag.Detail(DiagChannels.Geom, "restore-faithful", DiagFormat.Q(p.Title) + " " + line);

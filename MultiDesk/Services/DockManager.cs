@@ -8,10 +8,12 @@ using NM = MultiDesk.Interop.NativeMethods;
 namespace MultiDesk.Services
 {
     /// <summary>
-    /// Docks the bar to any screen edge and reserves that strip as an OS AppBar, the same behavior
-    /// QuickPane's pinned dock uses, generalized to all four edges. Supports a floating mode and an
-    /// auto-hide mode that collapses to a thin trigger strip. Dragging the bar near an edge snaps it
-    /// there on release.
+    /// Bar docking. Defines DockManager, which docks the bar to any screen edge and reserves that
+    /// strip as an OS AppBar, the same behavior QuickPane's pinned dock uses, generalized to all four
+    /// edges. Supports a floating mode and an auto-hide mode that collapses to a thin trigger strip.
+    /// Dragging the bar near an edge snaps it there on release, and a display scale or resolution
+    /// change puts the bar back on its edge.
+    /// Doc: docs/notes/MultiDesk/Services/DockManager.cs.md
     /// </summary>
     internal sealed class DockManager
     {
@@ -330,6 +332,19 @@ namespace MultiDesk.Services
         // ---- plumbing ------------------------------------------------------
         private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
         {
+            // WPF answers a display scale change by resizing the window to the rectangle Windows
+            // suggests, scaled from the old one, and a resolution change moves the screen edges. The
+            // bar is put back on its edge once WPF has finished with the message.
+            if (_applied && (msg == NM.WM_DPICHANGED || msg == NM.WM_DISPLAYCHANGE))
+            {
+                string cause = msg == NM.WM_DPICHANGED ? "dpi-changed" : "display-changed";
+                DiagPane.Declare(cause);
+                _w.Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    DiagPane.Declare(cause);
+                    Reposition();
+                }), DispatcherPriority.Background);
+            }
             if (!_autoHide && _edge != "float" && _callbackMsg != 0 && (uint)msg == _callbackMsg &&
                 wParam.ToInt32() == NM.ABN_POSCHANGED)
             {

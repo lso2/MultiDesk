@@ -10,8 +10,8 @@ namespace MultiDesk.Services
     /// Navigation tracing. Defines DiagNav, which records the outcome every foreground event was
     /// given and then reads back where focus actually landed once the switch has settled. A commit
     /// arriving from the system task switcher is a window the user chose by hand, so a landing that
-    /// does not match it names the guard that decided otherwise. Also records desktop switches and
-    /// the outcome-code vocabulary the trace is written in.
+    /// does not match it names the guard that decided otherwise. Also records desktop switches, the
+    /// launch desktop and the outcome-code vocabulary the trace is written in.
     /// Doc: docs/notes/MultiDesk/Services/Diag.md
     /// </summary>
     internal static class DiagNav
@@ -28,6 +28,7 @@ namespace MultiDesk.Services
         public const string OutSuppressed = "suppressed";
         public const string OutSuppressedSteer = "suppressed-steered-back";
         public const string OutNoFollowSetting = "follow-focus-off";
+        public const string OutGrabSteeredBack = "focus-grab-steered-back";
         public const string OutReunited = "reunited-sibling";
         public const string OutSwitchGuard = "switch-guard";
         public const string OutSwitched = "switched";
@@ -108,6 +109,8 @@ namespace MultiDesk.Services
                     + " active=" + activeDesktop.ToString(CultureInfo.InvariantCulture)
                     + (viaTaskChooser ? " via=alt-tab" : "")
                     + " state=" + DiagFormat.Flags(hwnd)
+                    + (steered == IntPtr.Zero ? "" : " focus-to=" + DiagFormat.H(steered)
+                        + (steered == NM.GetShellWindow() ? " (desktop)" : ""))
                     + (string.IsNullOrEmpty(detail) ? "" : " | " + detail));
                 if (windowDesktop < 0) return;
                 lock (Waiting)
@@ -141,8 +144,6 @@ namespace MultiDesk.Services
                 + " active=" + activeDesktop.ToString(CultureInfo.InvariantCulture));
         }
 
-        /// <summary>Sampled on the tracker heartbeat. The active desktop changing with no switch on
-        /// record means something moved the user without going through the one path that switches.</summary>
         /// <summary>The active desktop moved through a path other than a switch: a desktop was
         /// reordered, removed, or the count was lowered. Recorded so the heartbeat sample does not
         /// read an accounted-for move as one nobody asked for.</summary>
@@ -157,6 +158,21 @@ namespace MultiDesk.Services
                 + " cause=" + cause);
         }
 
+        /// <summary>The desktop chosen at launch, the rule that chose it, and the foreground window at
+        /// that moment.</summary>
+        public static void Started(int active, string reason, IntPtr foreground)
+        {
+            _lastActive = active;
+            _switchCause = "startup-" + reason;
+            _switchCauseTick = Environment.TickCount;
+            if (!Diag.Enabled) return;
+            Diag.Write(DiagChannels.Nav, "startup-desktop", "active=" + active.ToString(CultureInfo.InvariantCulture)
+                + " reason=" + reason + " foreground=" + DiagFormat.H(foreground)
+                + " " + DiagFormat.Q(foreground == IntPtr.Zero ? "" : NM.TextOf(foreground)));
+        }
+
+        /// <summary>Sampled on the tracker heartbeat. The active desktop changing with no switch on
+        /// record means something moved the user without going through the one path that switches.</summary>
         public static void SampleActive(int activeIndex)
         {
             if (!Diag.Enabled) return;

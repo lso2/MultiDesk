@@ -7,9 +7,10 @@ namespace MultiDesk.Services
     /// <summary>
     /// The landing verdict. Defines DiagNavLanding, which reads where the foreground actually ended
     /// up once a decision has settled and names what that says. A window the user cannot see holding
-    /// the keyboard is read from the window itself, never from a desktop index. A landing elsewhere
-    /// counts as a fault only when MultiDesk put focus there: another process taking it, or the same
-    /// app opening a window of its own, is somebody else's doing.
+    /// the keyboard is read from the window itself, never from a desktop index. A landing on a shell
+    /// route or on another window of the same app is the person's or the app's own doing. A fault
+    /// is reported when MultiDesk sent focus away from a hand-picked window, and when another
+    /// process holds the foreground after a switch.
     /// Doc: docs/notes/MultiDesk/Services/Diag.md
     /// </summary>
     internal static class DiagNavLanding
@@ -53,6 +54,35 @@ namespace MultiDesk.Services
                     return;
                 }
 
+                // Alt+Tab, Start, the taskbar or the tray overflow holding the foreground is the person
+                // opening a shell route again while this settled.
+                if (ShellRoutes.RouteOf(fg) != null)
+                {
+                    Diag.Detail(DiagChannels.Fg, "landed-on-shell-route", where);
+                    return;
+                }
+
+                // Focus resting where MultiDesk itself sent it means MultiDesk decided the outcome.
+                if (steered != IntPtr.Zero && fg == steered)
+                {
+                    if (viaTaskChooser)
+                    {
+                        // A window the user picked by hand in Alt+Tab, with focus sent somewhere else
+                        // by MultiDesk. The outcome names which decision produced it.
+                        Diag.Write(DiagChannels.Fg, "alt-tab-not-honored", where + " " + DiagFormat.Flags(hwnd));
+                        DiagBug.Report("alt-tab-commit-not-honored", DiagFormat.Q(title), where);
+                        return;
+                    }
+                    if (outcome == DiagNav.OutBreakerCooldown || outcome == DiagNav.OutBreakerTrip)
+                    {
+                        Diag.Write(DiagChannels.Fg, "breaker-blocked", where);
+                        DiagBug.Report("switch-breaker-blocked-foreground", DiagFormat.Q(title), where);
+                        return;
+                    }
+                    Diag.Detail(DiagChannels.Fg, "steered-away", where);
+                    return;
+                }
+
                 // The app the user picked opening a window of its own is the app's business. Its
                 // dialogs, pickers and tool panels all arrive this way within the settle window.
                 uint wanted = DiagWindow.ProcessOf(hwnd);
@@ -71,34 +101,8 @@ namespace MultiDesk.Services
                     return;
                 }
 
-                // Focus resting where MultiDesk itself sent it is the only remaining case that says
-                // MultiDesk decided the outcome. Anything else took focus while this was settling.
-                bool mdPlaced = steered != IntPtr.Zero && fg == steered;
-                if (!mdPlaced)
-                {
-                    Diag.Detail(DiagChannels.Fg, "focus-moved-on-by-something-else", where
-                        + " steered=" + (steered == IntPtr.Zero ? "none" : DiagFormat.H(steered)));
-                    return;
-                }
-
-                if (viaTaskChooser)
-                {
-                    // The previous foreground was the system task switcher, so this was a window the
-                    // user picked by hand in Alt+Tab, and MultiDesk sent focus somewhere else. The
-                    // outcome names which decision produced it.
-                    Diag.Write(DiagChannels.Fg, "alt-tab-not-honored", where + " " + DiagFormat.Flags(hwnd));
-                    DiagBug.Report("alt-tab-commit-not-honored", DiagFormat.Q(title), where);
-                    return;
-                }
-
-                if (outcome == DiagNav.OutBreakerCooldown || outcome == DiagNav.OutBreakerTrip)
-                {
-                    Diag.Write(DiagChannels.Fg, "breaker-blocked", where);
-                    DiagBug.Report("switch-breaker-blocked-foreground", DiagFormat.Q(title), where);
-                    return;
-                }
-
-                Diag.Detail(DiagChannels.Fg, "steered-away", where);
+                Diag.Detail(DiagChannels.Fg, "focus-moved-on-by-something-else", where
+                    + " steered=" + (steered == IntPtr.Zero ? "none" : DiagFormat.H(steered)));
             }
             catch { }
         }

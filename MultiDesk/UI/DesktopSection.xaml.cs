@@ -10,9 +10,11 @@ using NM = MultiDesk.Interop.NativeMethods;
 namespace MultiDesk.UI
 {
     /// <summary>
-    /// One desktop in the bar: an optional title, a grid of its window tiles, and a full lighter
-    /// border when it is active. Clicking switches to it, double-clicking the title renames it,
-    /// dropping a window tile moves that window here, and right click opens the desktop menu.
+    /// One desktop in the bar. Defines DesktopSection: an optional title, a grid of its window tiles,
+    /// and a full lighter border when it is active. Clicking switches to it, double-clicking the
+    /// title renames it, dropping a window tile moves that window here, and right click opens the
+    /// desktop menu.
+    /// Doc: docs/notes/MultiDesk/UI/DesktopSection.xaml.md
     /// </summary>
     public partial class DesktopSection : UserControl
     {
@@ -45,12 +47,14 @@ namespace MultiDesk.UI
 
         private DesktopModel Model { get { return DataContext as DesktopModel; } }
 
-        // Actual width available to the icon grid, used to snap the bar to whole columns accurately.
-        public double IconAreaViewportWidth { get { return TilesScroller != null ? TilesScroller.ViewportWidth : 0; } }
+        // Width available to the icon grid, used to snap the bar to whole columns. With no scrollbar
+        // reserved, the viewport is the scroller's ActualWidth, current inside a size event.
+        // ViewportWidth is updated one layout pass later.
+        public double IconAreaViewportWidth { get { return TilesScroller != null ? TilesScroller.ActualWidth : 0; } }
 
         // The same measurement on the other axis, which is the one icons wrap along when the bar is
         // docked top or bottom.
-        public double IconAreaViewportHeight { get { return TilesScroller != null ? TilesScroller.ViewportHeight : 0; } }
+        public double IconAreaViewportHeight { get { return TilesScroller != null ? TilesScroller.ActualHeight : 0; } }
 
         private void OnLoaded(object sender, RoutedEventArgs e)
         {
@@ -163,7 +167,7 @@ namespace MultiDesk.UI
                 else
                 {
                     TilesScroller.Width = double.NaN; // size to content
-                    double vpH = TilesScroller.ViewportHeight;
+                    double vpH = TilesScroller.ActualHeight;
                     int perCol = vpH > cell ? (int)(vpH / cell) : 1;
                     int cnt = m.Windows != null ? m.Windows.Count : 0;
                     m.DisplayRows = Math.Max(1, perCol > 0 ? (int)Math.Ceiling((double)cnt / perCol) : 1);
@@ -372,7 +376,7 @@ namespace MultiDesk.UI
             // Empty-area click switches to this desktop. Tile clicks mark themselves handled.
             if (e.Handled) return;
             var m = Model;
-            if (m != null) App.Desktops.SwitchTo(m.Index);
+            if (m != null) App.Desktops.SwitchTo(m.Index, "desktop-area-click");
         }
 
         // Title: single click switches, double click renames, drag reorders the desktop.
@@ -410,7 +414,7 @@ namespace MultiDesk.UI
             if (_titlePressed && !_titleDragging)
             {
                 var m = Model;
-                if (m != null) App.Desktops.SwitchTo(m.Index);
+                if (m != null) App.Desktops.SwitchTo(m.Index, "desktop-title-click");
             }
             _titlePressed = false;
             e.Handled = true;
@@ -462,7 +466,7 @@ namespace MultiDesk.UI
         private ContextMenu BuildMenu(DesktopModel m)
         {
             var cm = new ContextMenu();
-            cm.Items.Add(Item("Switch to this desktop", () => App.Desktops.SwitchTo(m.Index)));
+            cm.Items.Add(Item("Switch to this desktop", () => App.Desktops.SwitchTo(m.Index, "desktop-menu")));
             cm.Items.Add(new Separator());
             cm.Items.Add(Item("Add desktop", () => App.Desktops.AddDesktop()));
             cm.Items.Add(Item("Rename...", BeginRename));

@@ -1,3 +1,6 @@
+// Data models. Defines MultiDeskSettings (the contents of settings.json, with AppPin and
+// PlacementEntry), DesktopModel and WindowModel, the records the services keep and the UI binds to.
+// Doc: docs/notes/MultiDesk/Models/Models.cs.md
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -48,8 +51,10 @@ namespace MultiDesk.Models
         [DataMember(Name = "startWithWindows", Order = 10)]
         public bool StartWithWindows { get; set; }
 
+        // Follow focus across desktops: a window on another desktop grabbing focus on its own switches
+        // to its desktop. A pick through Alt+Tab, the taskbar, the tray or Start switches either way.
         [DataMember(Name = "autoSwitchOnForeground", Order = 12)]
-        public bool AutoSwitchOnForeground { get; set; } = true;
+        public bool AutoSwitchOnForeground { get; set; }
 
         [DataMember(Name = "alwaysOnTop", Order = 19)]
         public bool AlwaysOnTop { get; set; } = true;
@@ -97,7 +102,7 @@ namespace MultiDesk.Models
 
         // Bumped when layout defaults change, so an older config migrates to the new look once.
         [DataMember(Name = "schemaVersion", Order = 15)]
-        public int SchemaVersion { get; set; } = 6;
+        public int SchemaVersion { get; set; } = 7;
 
         // Rows of icons shown per desktop before that desktop's grid scrolls. Keeps every desktop a
         // fixed, even height instead of expanding to fit its windows.
@@ -128,6 +133,11 @@ namespace MultiDesk.Models
         [DataMember(Name = "autoCheckUpdates", Order = 21)]
         public bool AutoCheckUpdates { get; set; } = true;
 
+        // The desktop active at the last settings write, read at launch by DesktopManager.Startup.cs.
+        // -1 in files written before 2.11.0.
+        [DataMember(Name = "activeDesktop", Order = 27)]
+        public int ActiveDesktop { get; set; } = -1;
+
         // GetUninitializedObject during deserialization skips field initializers, so restore the
         // non-false/non-zero defaults before members load.
         [OnDeserializing]
@@ -143,7 +153,6 @@ namespace MultiDesk.Models
             TrimDelayMs = 5000;
             DesktopCount = 6;
             RowsPerDesktop = 3;
-            AutoSwitchOnForeground = true;
             AlwaysOnTop = true;
             ReserveSpace = true;
             TitleAlignment = "center";
@@ -155,6 +164,7 @@ namespace MultiDesk.Models
             FloatTop = 80;
             Diagnostics = true;
             AutoCheckUpdates = true;
+            ActiveDesktop = -1;
             SchemaVersion = 0; // old files lack this, so they read as 0 and migrate
         }
 
@@ -177,6 +187,8 @@ namespace MultiDesk.Models
             TitleAlignment = ta;
             if (DesktopCount < 1) DesktopCount = 1;
             if (DesktopCount > 32) DesktopCount = 32;
+            if (ActiveDesktop >= DesktopCount) ActiveDesktop = DesktopCount - 1;
+            if (ActiveDesktop < -1) ActiveDesktop = -1;
             if (RowsPerDesktop < 1) RowsPerDesktop = 1;
             if (RowsPerDesktop > 12) RowsPerDesktop = 12;
             if (TrimDelayMs < 500) TrimDelayMs = 500;

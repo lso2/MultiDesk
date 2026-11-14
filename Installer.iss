@@ -1,7 +1,8 @@
 ; MultiDesk one-click installer for Inno Setup (https://jrsoftware.org/isinfo.php).
 ;
-; Produces Output\MultiDesk-<version>-release.exe. Because MultiDesk is a user-mode app that only
-; writes HKCU keys, the installer runs without administrator rights (PrivilegesRequired=lowest). It
+; Produces MultiDeskSetup-<version>-release.exe in the Output folder beside app. The GitHub
+; release assets use the same name. Because MultiDesk is a user-mode app that only writes HKCU
+; keys, the installer runs without administrator rights (PrivilegesRequired=lowest). It
 ; installs the executable, adds a startup entry, and launches the app. Uninstall preserves settings
 ; under %APPDATA%\MultiDesk.
 ;
@@ -55,7 +56,8 @@ DefaultDirName={localappdata}\{#MyAppName}
 DisableProgramGroupPage=yes
 DisableDirPage=yes
 PrivilegesRequired=lowest
-OutputBaseFilename={#MyAppName}-{#MyAppVersion}-release
+OutputDir=..\Output
+OutputBaseFilename={#MyAppName}Setup-{#MyAppVersion}-release
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern

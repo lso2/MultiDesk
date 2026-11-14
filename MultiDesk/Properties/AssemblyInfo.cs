@@ -20,5 +20,5 @@ using System.Windows;
 // The one place the version is written. Services\AppVersion.cs reads it off the running assembly,
 // the settings window and the trace header print what it reads, the update check compares against it,
 // and Installer.iss takes it from the built executable rather than carrying its own copy.
-[assembly: AssemblyVersion("2.10.0.0")]
-[assembly: AssemblyFileVersion("2.10.0.0")]
+[assembly: AssemblyVersion("2.11.0.0")]
+[assembly: AssemblyFileVersion("2.11.0.0")]

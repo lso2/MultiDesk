@@ -10,8 +10,10 @@ using NM = MultiDesk.Interop.NativeMethods;
 namespace MultiDesk.UI
 {
     /// <summary>
-    /// The bar shell. Hosts one section per desktop, docks to any edge through DockManager, snaps to an
-    /// edge when the header is dragged near one, and resizes its thickness with the inner-edge gripper.
+    /// The bar shell. Defines MainWindow, which hosts one section per desktop, docks to any edge
+    /// through DockManager, snaps to an edge when the header is dragged near one, and sets its
+    /// thickness from the inner-edge gripper.
+    /// Doc: docs/notes/MultiDesk/UI/MainWindow.xaml.cs.md
     /// </summary>
     public partial class MainWindow : Window
     {
@@ -33,10 +35,14 @@ namespace MultiDesk.UI
         private System.Windows.Threading.DispatcherTimer _snapDwell;
         private string _pendingEdge;
 
+        // Section margin, border and padding on both sides of the icon grid, from DesktopSection.xaml.
+        // Used only when no laid-out section is available to measure.
+        private const double SectionChromeDip = 11;
+
         private bool _resizing;
         private int _resizeStartX, _resizeStartY, _resizeStartThickness;
         private double _resizeScale = 1.0;
-        private double _resizeChromeDip = 15;
+        private double _resizeChromeDip = SectionChromeDip;
         private double _resizeCellDip = 30;
 
         private System.Windows.Threading.DispatcherTimer _pinTimer;
@@ -72,7 +78,8 @@ namespace MultiDesk.UI
                 if (sec != null) viewport = vertical ? sec.IconAreaViewportWidth : sec.IconAreaViewportHeight;
                 double scale = 1.0;
                 try { scale = VisualTreeHelper.GetDpi(this).DpiScaleX; } catch { }
-                DiagPane.Sample(_handle, s.BarThicknessPx, s.DockEdge, viewport, MeasuredCellDip(), scale);
+                DiagPane.Sample(_handle, s.BarThicknessPx, s.DockEdge, viewport, MeasuredCellDip(), scale,
+                    ActualWidth, ActualHeight);
             }
             catch (Exception ex) { Log.Error("pane geometry sample", ex); }
         }
@@ -101,14 +108,10 @@ namespace MultiDesk.UI
 
         private void OnUpdate(object sender, RoutedEventArgs e) { App.OpenProjectLink(); }
 
-        private bool _widthSnapped;
-        private int _snapAttempts;
-
         private void OnScrollerSizeChanged(object sender, SizeChangedEventArgs e)
         {
             // Tell the desktops how much height they have, so sections auto-fill it.
             App.Desktops.NotifyLayout(e.NewSize.Height - 4);
-            if (!_widthSnapped) TrySnapWidth();
             SampleGeometry();
         }
 
@@ -118,45 +121,6 @@ namespace MultiDesk.UI
         private void RefillLayout()
         {
             if (Scroller != null) App.Desktops.NotifyLayout(Scroller.ActualHeight - 4);
-        }
-
-        // Once laid out, snap the current width to a whole number of columns so the grid never shows a
-        // near-column gap on first run, using the measured chrome and the display DPI.
-        private void TrySnapWidth()
-        {
-            var edge = App.Settings.Current.DockEdge;
-            if (edge == "top" || edge == "bottom") { _widthSnapped = true; return; }
-            var sec = FirstSection(SectionsHost);
-            double vpDip = (sec != null) ? sec.IconAreaViewportWidth : 0;
-            if (vpDip <= 4) return; // sections not laid out yet; a later size event retries
-
-            var tile = FirstTile(SectionsHost);
-            double cellDip = (tile != null && tile.ActualWidth > 4) ? tile.ActualWidth : 0;
-            if (cellDip <= 0)
-            {
-                // Wait for a real rendered tile so the snap uses the true DPI-rounded width. After a few
-                // tries (for example the active desktop is empty), fall back to the estimate.
-                if (_snapAttempts++ < 12) return;
-                cellDip = App.Settings.Current.IconSizePx + 6;
-            }
-
-            double scale = 1.0;
-            try { scale = VisualTreeHelper.GetDpi(this).DpiScaleX; } catch { }
-            if (scale <= 0) scale = 1.0;
-            double barDip = App.Settings.Current.BarThicknessPx / scale;
-            double chromeDip = barDip - vpDip;
-            int cols = (int)Math.Max(1, Math.Round(vpDip / cellDip));
-            int nt = (int)Math.Round((chromeDip + cols * cellDip) * scale);
-            _widthSnapped = true;
-            if (Math.Abs(nt - App.Settings.Current.BarThicknessPx) >= 1)
-            {
-                DiagPane.Declare("whole-column-snap");
-                Diag.Write(DiagChannels.Pane, "column-snap", "viewport=" + vpDip.ToString("0.0")
-                    + "dip cell=" + cellDip.ToString("0.0") + "dip columns=" + cols
-                    + " thickness=" + App.Settings.Current.BarThicknessPx + "px->" + nt + "px scale=" + scale.ToString("0.00"));
-                App.Settings.Current.BarThicknessPx = nt;
-                if (_dock != null) _dock.Apply();
-            }
         }
 
         private void OnSourceInitialized(object sender, EventArgs e)
@@ -182,35 +146,11 @@ namespace MultiDesk.UI
 
             StartPinAllDesktops();
             UpdateOrientationAndGripper();
-            ScheduleStartupSnap();
         }
 
-        // After launch the active desktop's tiles need a moment to render. Re-run the column snap once a
-        // real tile exists, so the grid lands on whole columns without the user nudging the bar.
-        private void ScheduleStartupSnap()
-        {
-            var t = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
-            int tries = 0;
-            t.Tick += (s, e) =>
-            {
-                tries++;
-                var tile = FirstTile(SectionsHost);
-                bool haveTile = tile != null && tile.ActualWidth > 4;
-                if (haveTile || tries >= 12)
-                {
-                    _widthSnapped = false;
-                    _snapAttempts = 12; // permit the estimate fallback if no tile ever rendered
-                    DiagPane.Declare("startup-column-snap");
-                    TrySnapWidth();
-                    RefillLayout();
-                    t.Stop();
-                }
-            };
-            t.Start();
-        }
-
-        // Pin the bar to every virtual desktop so it stays visible after a desktop switch. The shell
-        // view only exists once the window has rendered, so retry a few times until it takes.
+        // Pins the bar to every Windows virtual desktop. The shell view exists only once the window has
+        // rendered. PinWindow is retried a few times, and the last error is logged once if no attempt
+        // succeeds.
         private void StartPinAllDesktops()
         {
             _pinAttempts = 0;
@@ -218,8 +158,13 @@ namespace MultiDesk.UI
             _pinTimer.Tick += (s, e) =>
             {
                 _pinAttempts++;
-                bool ok = _handle != IntPtr.Zero && MultiDesk.Interop.VirtualDesktop.PinWindow(_handle);
-                if (ok || _pinAttempts >= 8) { _pinTimer.Stop(); _pinTimer = null; }
+                string error = _handle != IntPtr.Zero
+                    ? MultiDesk.Interop.VirtualDesktop.PinWindow(_handle) : "no window handle yet";
+                if (error != null && _pinAttempts < 8) return;
+                _pinTimer.Stop();
+                _pinTimer = null;
+                if (error != null)
+                    Log.Info("Bar not pinned to all Windows virtual desktops after " + _pinAttempts + " attempts: " + error);
             };
             _pinTimer.Start();
         }
@@ -377,8 +322,8 @@ namespace MultiDesk.UI
             var sec = FirstSection(SectionsHost);
             double vpDip = (sec != null) ? sec.IconAreaViewportWidth : 0;
             double barDip = App.Settings.Current.BarThicknessPx / _resizeScale;
-            _resizeChromeDip = (vpDip > 4) ? (barDip - vpDip) : 15;
-            if (_resizeChromeDip < 0) _resizeChromeDip = 15;
+            _resizeChromeDip = (vpDip > 4) ? (barDip - vpDip) : SectionChromeDip;
+            if (_resizeChromeDip < 0) _resizeChromeDip = SectionChromeDip;
             _resizeCellDip = MeasuredCellDip();
 
             _resizing = true;

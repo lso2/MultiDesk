@@ -92,7 +92,9 @@
     <Compile Include="Services\DesktopManager.cs" />
     <Compile Include="Services\DesktopManager.Foreground.cs" />
     <Compile Include="Services\DesktopManager.Placements.cs" />
+    <Compile Include="Services\DesktopManager.Startup.cs" />
     <Compile Include="Services\DesktopManager.Visibility.cs" />
+    <Compile Include="Services\ShellRoutes.cs" />
     <Compile Include="Services\WindowActions.cs" />
     <Compile Include="Services\DockManager.cs" />
     <Compile Include="Services\PreviewCache.cs" />

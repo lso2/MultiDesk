@@ -10,15 +10,13 @@ using NM = MultiDesk.Interop.NativeMethods;
 namespace MultiDesk.Services
 {
     /// <summary>
-    /// The managed desktop engine. MultiDesk owns desktops 1..N and assigns every tracked window to
-    /// one. Switching shows the active desktop's windows and hides or parks the rest (see
-    /// DesktopManager.Visibility.cs for why there are two mechanisms and why parking is what lets the
-    /// real, unmodified Windows Alt+Tab see every desktop's windows on its own). Off-desktop windows
-    /// can have their working set trimmed after a delay to return physical memory under heavy load.
-    /// Split into partials: this file holds the lifecycle, desktop operations, and pins;
-    /// DesktopManager.Foreground.cs holds the foreground-follow logic that keeps focus-follow honest;
-    /// DesktopManager.Placements.cs holds remembered window placement across restarts;
-    /// DesktopManager.Visibility.cs holds the one visibility engine.
+    /// The managed desktop engine. Defines DesktopManager, which owns desktops 1..N and assigns every
+    /// tracked window to one. Switching shows the active desktop's windows and hides or parks the
+    /// rest. Off-desktop windows can have their working set trimmed after a delay. This file has the
+    /// window lifecycle, desktop operations and pins. The foreground decisions are in
+    /// DesktopManager.Foreground.cs, remembered placement in DesktopManager.Placements.cs, the launch
+    /// desktop in DesktopManager.Startup.cs, and the visibility engine in DesktopManager.Visibility.cs.
+    /// Doc: docs/notes/MultiDesk/Services/DesktopManager.cs.md
     /// </summary>
     public sealed partial class DesktopManager
     {
@@ -54,12 +52,19 @@ namespace MultiDesk.Services
             var names = _settings.Current.DesktopNames;
             var rows = _settings.Current.DesktopRows;
             for (int i = 0; i < count; i++)
-                Desktops.Add(new DesktopModel { Index = i, Name = NameFor(names, i), Rows = RowsFor(rows, i), IsActive = (i == 0) });
-            ActiveIndex = 0;
+                Desktops.Add(new DesktopModel { Index = i, Name = NameFor(names, i), Rows = RowsFor(rows, i) });
 
             _pendingPlacements = (_settings.Current.Placements != null)
                 ? new List<PlacementEntry>(_settings.Current.Placements)
                 : new List<PlacementEntry>();
+
+            // Set before window discovery, which parks every window off the active desktop.
+            string reason;
+            IntPtr foreground;
+            ActiveIndex = StartupDesktop(out reason, out foreground);
+            for (int i = 0; i < Desktops.Count; i++) Desktops[i].IsActive = (i == ActiveIndex);
+            RecordActive(false);
+            DiagNav.Started(ActiveIndex, reason, foreground);
 
             // Remembered placements restore the previous session at launch only. After a short boot grace
             // period, drop them so a window opened by hand later goes to the current desktop, not its old
@@ -75,10 +80,7 @@ namespace MultiDesk.Services
             _trimTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(_settings.Current.TrimDelayMs) };
             _trimTimer.Tick += OnTrimTick;
 
-            // Save where every window sits periodically, not only on a clean exit, so a crash or a kill
-            // never loses more than a short moment of window movement. This is what lets a window found
-            // hidden and untracked after an unexpected restart be matched back to its desktop instead of
-            // staying invisible with nothing left running that still remembers where it belongs.
+            // Placements are saved every 45 seconds as well as at exit, for a restart after a crash.
             _placementSaveTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(45) };
             _placementSaveTimer.Tick += (s, e) => { if (_settings.Current.RememberPlacement) SavePlacements(); };
             _placementSaveTimer.Start();
@@ -116,19 +118,8 @@ namespace MultiDesk.Services
             if (target < 0)
             {
                 target = TakePlacement(exe, profile, title, out placeOrder); // remembered desktop, if any
-                // A process that already has a tracked window keeps that window's desktop. Many apps
-                // (an IDE's floating tool panel, a file picker, Explorer's secondary frames) open a
-                // second top-level HWND lazily, sometime after the main window, and defaulting it to
-                // "whatever is active right now" splits one session across two desktops. Interacting
-                // with the split-off piece later then reads as a deliberate switch to some other
-                // desktop and drags that desktop's unrelated windows into view with it.
-                //
-                // Never for the window the user is in RIGHT NOW, though: a new window discovered
-                // while it holds the foreground (a form's dialog, a save prompt, a picker) just
-                // opened under the user's cursor, and inheriting a sibling's desktop would park it
-                // off screen mid-interaction, which deactivates it, and a dialog or modal that loses
-                // activation is pushed behind its app or closes itself on the spot. A focused new
-                // window belongs on the desktop the user is on.
+                // A new window of a process that has one keeps that window's desktop, unless it is the
+                // foreground window. The doc has the cases for both rules.
                 if (target < 0 && NM.GetForegroundWindow() != hwnd) target = SiblingDesktopFor(pid);
                 if (target < 0) target = ActiveIndex;
             }
@@ -158,9 +149,7 @@ namespace MultiDesk.Services
         }
 
         // The desktop of an existing window from the same process, or -1 if this process has none
-        // yet. A sibling on the ACTIVE desktop wins outright: a background window of an app the user
-        // is working with right here belongs right here, and picking whichever sibling happened to
-        // enumerate first was scattering new windows onto other desktops seemingly at random.
+        // yet. A sibling on the active desktop wins over siblings elsewhere.
         private int SiblingDesktopFor(uint pid)
         {
             if (pid == 0) return -1;
@@ -174,13 +163,8 @@ namespace MultiDesk.Services
             return found;
         }
 
-        // A hidden window from a process that already has another window on the active desktop is a
-        // secondary top-level window of a session the user is already in, not a deliberate visit to
-        // wherever it happened to be tracked. Reuniting it here in place, instead of switching the
-        // whole desktop to its DesktopIndex, is what stops clicking into an app's own popped-out
-        // window from yanking the user to an unrelated desktop and surfacing that desktop's other
-        // windows along with it. Returns true when it reunited the window (caller should not also
-        // SwitchTo), false when no sibling was found on the active desktop (normal switch applies).
+        // Hide mode: moves a window of a process with another window on the active desktop to the
+        // active desktop. Returns true when it did, and the caller does not switch.
         private bool TryReuniteSibling(WindowModel w)
         {
             if (w == null || w.Pid == 0) return false;
@@ -230,7 +214,7 @@ namespace MultiDesk.Services
         public IEnumerable<WindowModel> AllWindows { get { return _byHwnd.Values.ToList(); } }
 
         // ---- desktop operations --------------------------------------------
-        public void SwitchTo(int index, bool activateTop = true, bool capturePreviews = true, string cause = "unspecified")
+        public void SwitchTo(int index, string cause, bool activateTop = true, bool capturePreviews = true)
         {
             if (index < 0 || index >= Desktops.Count) return;
             try
@@ -244,17 +228,21 @@ namespace MultiDesk.Services
                 IntPtr activated = IntPtr.Zero;
                 if (activateTop)
                 {
-                    var d = DesktopAt(index);
-                    var top = (d != null && d.Windows.Count > 0) ? d.Windows[d.Windows.Count - 1] : null;
+                    // The desktop's highest window in the z-order that is not minimized, the window
+                    // Windows itself activates on a desktop switch. A desktop showing none gets the
+                    // Windows desktop, and a window the user minimized stays minimized.
+                    var top = TopOfActiveDesktop(null, ParkingEnabled);
                     if (top != null)
                     {
                         activated = top.Hwnd;
                         GuardForeground(top.Hwnd);
                         WindowActions.ForceForeground(top.Hwnd);
                     }
+                    else WindowActions.FocusDesktop(NM.GetShellWindow());
                 }
                 var landed = DesktopAt(index);
                 DiagNav.Switched(from, index, cause, landed != null ? landed.Windows.Count : 0, activated);
+                RecordActive(true);
                 ScheduleTrim();
                 var h = ActiveChanged; if (h != null) h();
             }
@@ -349,11 +337,8 @@ namespace MultiDesk.Services
         }
 
         /// <summary>Reorder a window into the display slot of another, moving desktops if they differ.
-        /// Used for drag-to-reorder of the icons within or across desktops. The target's index is
-        /// captured BEFORE the dragged icon is removed: within one desktop, computing it after the
-        /// removal shifted every later icon back a slot, so a forward drag landed one spot early and
-        /// a one-step forward drag put the icon straight back where it started. Capturing first means
-        /// the icon lands exactly where it was dropped in both directions.</summary>
+        /// Used for drag-to-reorder of the icons. The target's index is read before the dragged icon
+        /// is removed.</summary>
         public void MoveWindowToSpotOf(IntPtr draggedHwnd, IntPtr targetHwnd)
         {
             WindowModel dragged, target;
@@ -518,6 +503,7 @@ namespace MultiDesk.Services
             int wasActive = ActiveIndex;
             if (ActiveIndex >= Desktops.Count) ActiveIndex = Desktops.Count - 1;
             if (ActiveIndex < 0) ActiveIndex = 0;
+            RecordActive(false);
             DiagNav.ActiveChanged(wasActive, ActiveIndex, "settings-reload");
             for (int i = 0; i < Desktops.Count; i++) Desktops[i].IsActive = (i == ActiveIndex);
             _switchCause = "settings-reload";
@@ -527,6 +513,7 @@ namespace MultiDesk.Services
 
         private void PersistDesktops()
         {
+            RecordActive(false);
             _settings.Current.DesktopCount = Desktops.Count;
             _settings.Current.DesktopNames = Desktops.Select(x => x.Name).ToList();
             _settings.Current.DesktopRows = Desktops.Select(x => x.Rows).ToList();
