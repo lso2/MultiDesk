@@ -10,11 +10,14 @@ namespace MultiDesk.UI
     /// <summary>
     /// Settings, applied live. Controls initialize from the stored configuration and write straight
     /// back to it, with Save raising the Changed event the rest of the app already reacts to.
+    /// Doc: docs/notes/MultiDesk/UI/SettingsWindow.xaml.cs.md
     /// </summary>
     public partial class SettingsWindow : Window
     {
         private static SettingsWindow _instance;
-        private bool _loading;
+        // True until LoadValues has run. Setting each slider's Minimum in InitializeComponent raises
+        // ValueChanged, and the handlers write nothing while this is set.
+        private bool _loading = true;
 
         public SettingsWindow()
         {
