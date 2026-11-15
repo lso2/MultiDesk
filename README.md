@@ -4,7 +4,7 @@
 ![.NET Framework](https://img.shields.io/badge/.NET%20Framework-4.8-512BD4.svg?logo=dotnet&logoColor=white)
 ![C#](https://img.shields.io/badge/C%23-7.3-239120.svg?logo=csharp&logoColor=white)
 ![UI](https://img.shields.io/badge/UI-WPF-1f6feb.svg)
-![Version](https://img.shields.io/badge/Version-2.11.0-success.svg)
+![Version](https://img.shields.io/badge/Version-2.11.1-success.svg)
 ![License](https://img.shields.io/badge/License-GPLv3-blue.svg)
 
 A lightweight virtual-desktop sidebar and window manager for Windows. MultiDesk groups your open windows into desktops shown in a bar that autohides on any side of your screen, letting you switch desktops easily and quickly, peek to preview windows on hover, and move or pin apps between desktops. You can create as many desktops as you want, resize the pane, name the desktops, and even move the desktops around with drag and drop. 
@@ -314,7 +314,7 @@ MultiDesk is a tray application built on WPF and documented Win32 interop, with 
 - **SHAppBarMessage:** the docked bar is registered as an AppBar, and maximized windows end at its edge
 - **DwmRegisterThumbnail:** the live hover preview is a DWM thumbnail, and remembered snapshots are captured with **PrintWindow**
 - **AttachThreadInput + SetForegroundWindow:** focus is set with MultiDesk's input queue attached to the foreground and target windows
-- **Shell window classes + GetLastInputInfo:** a window taking focus straight after Alt+Tab, the taskbar, the tray overflow or Start held it, with input in the last 5 seconds, is a pick
+- **GetLastInputInfo:** a window taking focus with keyboard or mouse input in the last 5 seconds is a pick, a taskbar button click included. A previous foreground window that closed, hid itself or was minimized makes it a Windows hand-off, except Alt+Tab, Start and the tray overflow
 - **WMI:** a browser's `--profile-directory` argument is read, and each profile is pinned separately
 - **ImmersiveShell `IVirtualDesktopPinnedApps`:** the bar is pinned to every Windows virtual desktop
 - **EmptyWorkingSet:** memory of off-desktop windows is trimmed

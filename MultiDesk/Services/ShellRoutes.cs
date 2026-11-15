@@ -6,11 +6,10 @@ using NM = MultiDesk.Interop.NativeMethods;
 namespace MultiDesk.Services
 {
     /// <summary>
-    /// Shell routes. Defines ShellRoutes, which names the part of the Windows shell a window belongs
-    /// to when a person picks windows through it: Alt+Tab, the taskbar, the tray overflow, or Start
-    /// with its search, notification and jump list panes. A window on another desktop that takes the
-    /// foreground straight after one of these held it, with keyboard or mouse input that recent, was
-    /// picked by that person.
+    /// Shell routes. Defines ShellRoutes, which names the part of the Windows shell a person picks a
+    /// window through: Alt+Tab, the taskbar, the tray overflow, or Start with its search,
+    /// notification and jump list panes. The route is read from the window that held the
+    /// foreground before a pick.
     /// Doc: docs/notes/MultiDesk/Services/ShellRoutes.cs.md
     /// </summary>
     internal static class ShellRoutes
@@ -21,7 +20,7 @@ namespace MultiDesk.Services
         public const string Start = "start";
 
         // A pick reaches the foreground right after the click or key release that made it. Older input
-        // means the route window was only holding the foreground when another window took it.
+        // means the window took the foreground on its own.
         private const uint PickInputMs = 5000;
 
         // Processes whose top-level Windows.UI.Core.CoreWindow is a shell pane. Store apps draw their
@@ -58,11 +57,9 @@ namespace MultiDesk.Services
             }
         }
 
-        /// <summary>True when route names a shell route and keyboard or mouse input arrived within
-        /// PickInputMs: a pick through that route.</summary>
-        public static bool IsPick(string route)
+        /// <summary>True when keyboard or mouse input arrived within PickInputMs.</summary>
+        public static bool InputRecent()
         {
-            if (route == null) return false;
             var info = new NM.LASTINPUTINFO { cbSize = (uint)Marshal.SizeOf(typeof(NM.LASTINPUTINFO)) };
             if (!NM.GetLastInputInfo(ref info)) return false;
             return unchecked((uint)Environment.TickCount - info.dwTime) < PickInputMs;

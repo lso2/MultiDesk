@@ -82,10 +82,14 @@ namespace MultiDesk.Services
 
             // The shell route whose window held the foreground right up to this event, if any. With
             // recent input, a window reaching the foreground out of Alt+Tab, the taskbar, the tray
-            // overflow or Start is a window a person picked there (ShellRoutes.IsPick). The trace
+            // overflow or Start is a window a person picked there (ShellRoutes.InputRecent). The trace
             // marks the Alt+Tab case, and the landing check reports focus MultiDesk sent away from it.
             string route = ShellRoutes.RouteOf(prevFg);
             bool viaChooser = route == ShellRoutes.AltTab;
+
+            // The previous foreground window closed, hid itself or was minimized.
+            bool prevVanished = prevFg != IntPtr.Zero && prevFg != hwnd
+                && (!NM.IsWindow(prevFg) || !NM.IsWindowVisible(prevFg) || NM.IsIconic(prevFg));
 
             // One-shot revert: an unrequested grab by a different tracked window right after focus was
             // placed deliberately gets pushed back once, which stops a media window from planting
@@ -169,8 +173,6 @@ namespace MultiDesk.Services
                 // window of a desktop stays on that desktop. A pick through Alt+Tab, a taskbar
                 // thumbnail, the tray overflow or Start leaves that shell window as the previous
                 // window, hidden by its own close. A shell route is exempt.
-                bool prevVanished = prevFg != IntPtr.Zero && prevFg != hwnd
-                    && (!NM.IsWindow(prevFg) || !NM.IsWindowVisible(prevFg) || NM.IsIconic(prevFg));
                 if (prevVanished && route == null)
                 {
                     var steer = ActiveDesktopFocusTarget(prevFg);
@@ -225,7 +227,11 @@ namespace MultiDesk.Services
             // parked and on-screen windows alike. Under parking, a grab that is not followed hands
             // focus back to the active desktop, and a grabbing window standing on screen goes back to
             // its own desktop.
-            bool userPicked = ShellRoutes.IsPick(route);
+            // Recent input with the previous window still in place, or after a shell route window,
+            // is the person's own pick. With input that recent, Windows grants the foreground only
+            // through that input or the foreground app (SetForegroundWindow remarks), and a taskbar
+            // click is input to the taskbar.
+            bool userPicked = ShellRoutes.InputRecent() && (route != null || !prevVanished);
             if (!userPicked && !_settings.Current.AutoSwitchOnForeground)
             {
                 if (stuckOffScreen || ParkingEnabled)
@@ -288,7 +294,7 @@ namespace MultiDesk.Services
             }
             DiagNav.Foreground(hwnd, active.Title, active.DesktopIndex, ActiveIndex,
                 DiagNav.OutSwitched, viaChooser, IntPtr.Zero, state);
-            SwitchTo(active.DesktopIndex, userPicked ? route + "-pick" : "focus-follow", false);
+            SwitchTo(active.DesktopIndex, userPicked ? (route ?? "input") + "-pick" : "focus-follow", false);
             WindowActions.ForceForeground(hwnd);
         }
 

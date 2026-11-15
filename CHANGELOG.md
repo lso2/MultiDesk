@@ -1,6 +1,10 @@
 # Changelog
 All notable changes to MultiDesk are recorded here. The major number marks a structural shift, the minor number marks a feature set, and the patch number marks fixes. The newest release is listed first.
 
+## [2.11.1] - 2026-11-14
+### Fixed
+- Clicking a window's taskbar button switches to its desktop.
+
 ## [2.11.0] - 2026-11-14
 ### Changed
 - Picking a window through Alt+Tab, the taskbar, the tray or Start always switches to its desktop.
